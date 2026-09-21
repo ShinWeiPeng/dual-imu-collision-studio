@@ -1,0 +1,89 @@
+# Python bytecode and tool caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pytype/
+.hypothesis/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Virtual environments and local package metadata
+.venv/
+venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Build, packaging, test, and benchmark output
+build/
+dist/
+pytest-*/
+.pytest-tmp-*/
+.test_tmp/
+/.test-tmp-*/
+*.whl
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+*-benchmark*.json
+
+# Codex/local-agent scratch data and generated diagnostics
+.codex/
+.agents/
+.codex_*/
+.codex-*.log
+.codex-*.json
+.codex-*.csv
+.codex_gui_*.log
+
+# Local specification workflow state; canonical specs stay in /specs/
+/spec-governance/
+
+# Tests, validation settings, tools, and reports are kept locally
+/tests/
+/tools/tests/
+/validation/
+/tools/validation/
+/docs/validation/
+/architecture/reviews/
+/architecture/change-plans/*-verification.md
+/evidence/
+/test-results/
+/playwright-report/
+
+# Local benchmark projects, analysis output, and document inspection caches
+/*-benchmark.dicsproj
+/nc-interval-maxima-*.csv
+/nc-verification-*.md
+/*.pptx.inspect.ndjson
+
+# Application runtime output
+app_start.stdout.log
+app_start.stderr.log
+diagnostics.log*
+session_state.json
+
+# IDE and editor-local settings
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

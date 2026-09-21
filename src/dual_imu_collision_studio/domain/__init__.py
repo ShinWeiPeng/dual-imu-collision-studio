@@ -1,0 +1,2 @@
+"""Framework-independent product domains."""
+

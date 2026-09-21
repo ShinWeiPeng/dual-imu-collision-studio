@@ -1,0 +1,629 @@
+standard_version: "2.2.0"
+schema_version: "2.2.0"
+project:
+  name: dual-imu-collision-studio
+  documentation_language: en
+source_sets:
+  - id: product-source
+    classification: production
+    include: ["src/**"]
+    exclude: []
+    purpose: Govern maintained Python and QML product source.
+    provenance: Human-reviewed implementation of SPEC-0001.
+  - id: development-source
+    classification: development
+    include: ["tests/**", "specs/**", "spec-governance/**", "pyproject.toml", "README.md"]
+    exclude: []
+    purpose: Keep tests, specification evidence, and packaging metadata outside product ownership.
+    provenance: Project development material.
+  - id: derived-architecture
+    classification: derived-documentation
+    include: ["architecture/generated/**", "architecture/ARCHITECTURE.md"]
+    exclude: []
+    purpose: Keep deterministic architecture views outside product ownership.
+    provenance: Architecture renderer output.
+  - id: build-output
+    classification: build-output
+    include: ["build/**", "dist/**", ".pytest_cache/**", "**/__pycache__/**"]
+    exclude: []
+    purpose: Exclude generated build and interpreter output.
+    provenance: Python and packaging tools.
+modules:
+  - id: studio_application
+    level: L0
+    role: composition
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/app.py"]
+    parent: null
+    depends_on: [data_workspace, learning_qualification, profile_export, desktop_adapter, tabular_adapter]
+    implements_ports: []
+    description:
+      purpose: Compose the desktop workflow and map results between sibling domains.
+      input_ports: []
+      output_ports: []
+      emitted_events: []
+      owned_state: []
+      side_effects:
+        - description: Start the Qt application and coordinate bounded background work.
+      errors: []
+      invariants:
+        - Sibling domains communicate only through application-owned mappings.
+        - Exactly one release composition root exists.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/app.py
+        symbol: main
+        kind: function
+    public_symbols:
+      - path: src/dual_imu_collision_studio/app.py
+        symbol: main
+        kind: function
+  - id: data_workspace
+    level: L1
+    role: domain
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/domain/data_workspace"]
+    parent: studio_application
+    depends_on: []
+    implements_ports: []
+    description:
+      purpose: Own imported recordings, mappings, test conditions, cycles, annotations, and derived Normal regions.
+      input_ports: [workspace.command]
+      output_ports: [workspace.tabular-input, workspace.events]
+      emitted_events: [workspace.changed]
+      owned_state: []
+      side_effects: []
+      errors: []
+      invariants:
+        - Collision truth is determined only by waveform interval annotation.
+        - Normal regions are derived and read-only.
+        - Every valid cycle has equal Pick, Put, and Fork Collision counts.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
+        symbol: WorkspaceService
+        kind: class
+    public_symbols:
+      - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+        symbol: WorkspaceCommandPort
+        kind: protocol
+      - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+        symbol: TabularInputPort
+        kind: protocol
+      - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+        symbol: WorkspaceEventPort
+        kind: protocol
+  - id: learning_qualification
+    level: L1
+    role: domain
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/domain/learning"]
+    parent: studio_application
+    depends_on: []
+    implements_ports: []
+    description:
+      purpose: Fit MIMO FIR candidates, replay exact target arithmetic, qualify every speed, and rank retained kernels.
+      input_ports: [learning.command]
+      output_ports: [learning.events]
+      emitted_events: [learning.progressed, learning.completed]
+      owned_state: []
+      side_effects: []
+      errors: []
+      invariants:
+        - Qualification always replays all supplied speeds.
+        - A passing collision detection has latency no greater than 10 ms.
+        - A retained fallback is accepted only when its training range equals its qualified range.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/domain/learning/service.py
+        symbol: LearningService
+        kind: class
+    public_symbols:
+      - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+        symbol: LearningCommandPort
+        kind: protocol
+      - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+        symbol: LearningEventPort
+        kind: protocol
+  - id: profile_export
+    level: L1
+    role: domain
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/domain/profile_export"]
+    parent: studio_application
+    depends_on: []
+    implements_ports: []
+    description:
+      purpose: Convert the selected semantic profile into deterministic C99 or C++17 header output.
+      input_ports: [profile.command]
+      output_ports: [profile.file-output, profile.events]
+      emitted_events: [profile.exported]
+      owned_state: []
+      side_effects: []
+      errors: []
+      invariants:
+        - Export contains one Profile struct and exact target numeric constants.
+        - The default file name is dual_imu_collision_profile.h.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/domain/profile_export/service.py
+        symbol: ProfileExportService
+        kind: class
+    public_symbols:
+      - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+        symbol: ProfileCommandPort
+        kind: protocol
+      - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+        symbol: ProfileFilePort
+        kind: protocol
+      - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+        symbol: ProfileEventPort
+        kind: protocol
+  - id: desktop_adapter
+    level: L3+
+    role: adapter
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/adapters/desktop", "src/dual_imu_collision_studio/qml"]
+    parent: null
+    depends_on: [profile_export]
+    implements_ports: [profile.file-output]
+    description:
+      purpose: Present the Qt Quick interface, execute analysis off the UI thread, and write approved header files.
+      input_ports: []
+      output_ports: []
+      emitted_events: []
+      owned_state: []
+      side_effects:
+        - description: Read user gestures, update QML view state, schedule worker jobs, and write selected files.
+      errors: []
+      invariants:
+        - Qt framework types never enter L1 public contracts.
+        - Long analysis never runs on the UI thread.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+        symbol: StudioController
+        kind: class
+    public_symbols:
+      - path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+        symbol: StudioController
+        kind: class
+  - id: tabular_adapter
+    level: L3+
+    role: adapter
+    implementation_status: planned
+    paths: ["src/dual_imu_collision_studio/adapters/tabular"]
+    parent: null
+    depends_on: [data_workspace]
+    implements_ports: [workspace.tabular-input]
+    description:
+      purpose: Decode CSV and XLSX files into demand-owned semantic columns and samples.
+      input_ports: []
+      output_ports: []
+      emitted_events: []
+      owned_state: []
+      side_effects:
+        - description: Read selected local CSV and XLSX files.
+      errors: []
+      invariants:
+        - Adapter-specific dataframe or workbook types never cross into the data domain.
+    entrypoints:
+      - path: src/dual_imu_collision_studio/adapters/tabular/reader.py
+        symbol: TabularReader
+        kind: class
+    public_symbols:
+      - path: src/dual_imu_collision_studio/adapters/tabular/reader.py
+        symbol: TabularReader
+        kind: class
+composition_roots:
+  - id: desktop-release
+    module: studio_application
+    path: src/dual_imu_collision_studio/app.py
+    symbol: main
+    purpose: Compose one complete Dual IMU Collision Studio desktop release.
+    source_set: product-source
+    kind: release
+ports:
+  - id: workspace.command
+    owner: data_workspace
+    direction: input
+    kind: command
+    contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    implemented_by: []
+    description:
+      purpose: Import, configure, annotate, or validate workspace data.
+      data: Semantic recording, mapping, condition, cycle, and annotation commands.
+      timing: sync
+      immediate_rejections: [{code: invalid-workspace-command, condition: Command violates a workspace invariant.}]
+    symbols: [WorkspaceCommandPort]
+  - id: workspace.tabular-input
+    owner: data_workspace
+    direction: output
+    kind: dependency
+    contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    implemented_by: [tabular_adapter]
+    description:
+      purpose: Read selected tabular data through a domain-owned contract.
+      data: Column names, row values, and source metadata.
+      timing: sync
+      immediate_rejections: [{code: unreadable-table, condition: The selected file cannot be decoded safely.}]
+    symbols: [TabularInputPort]
+  - id: workspace.events
+    owner: data_workspace
+    direction: output
+    kind: event
+    contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    implemented_by: []
+    description:
+      purpose: Publish a committed workspace snapshot.
+      data: Immutable semantic workspace snapshot.
+      timing: sync
+      immediate_rejections: []
+    symbols: [WorkspaceEventPort]
+  - id: learning.command
+    owner: learning_qualification
+    direction: input
+    kind: command
+    contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+    implemented_by: []
+    description:
+      purpose: Start or cancel one bounded learning and qualification run.
+      data: Workspace snapshot, numeric type, candidate grid, and memory limit.
+      timing: async
+      immediate_rejections: [{code: learning-not-ready, condition: Required setup or annotations are incomplete.}]
+    symbols: [LearningCommandPort]
+  - id: learning.events
+    owner: learning_qualification
+    direction: output
+    kind: event
+    contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+    implemented_by: []
+    description:
+      purpose: Publish learning progress and committed qualification results.
+      data: Progress stage, candidate counts, speed coverage, ranking, and selected profile.
+      timing: async
+      immediate_rejections: []
+    symbols: [LearningEventPort]
+  - id: profile.command
+    owner: profile_export
+    direction: input
+    kind: command
+    contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    implemented_by: []
+    description:
+      purpose: Render and save an approved qualified profile.
+      data: Qualified semantic profile, language target, namespace, and destination.
+      timing: sync
+      immediate_rejections: [{code: profile-not-qualified, condition: No accepted qualified profile was selected.}]
+    symbols: [ProfileCommandPort]
+  - id: profile.file-output
+    owner: profile_export
+    direction: output
+    kind: dependency
+    contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    implemented_by: [desktop_adapter]
+    description:
+      purpose: Save generated header text to a user-selected path.
+      data: Destination path, UTF-8 header text, and overwrite choice.
+      timing: sync
+      immediate_rejections: [{code: write-denied, condition: Destination cannot be written or overwrite was not approved.}]
+    symbols: [ProfileFilePort]
+  - id: profile.events
+    owner: profile_export
+    direction: output
+    kind: event
+    contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    implemented_by: []
+    description:
+      purpose: Publish successful profile export metadata.
+      data: File path, language, numeric type, and qualified speed range.
+      timing: sync
+      immediate_rejections: []
+    symbols: [ProfileEventPort]
+events:
+  - id: workspace.changed
+    owner: data_workspace
+    output_port: workspace.events
+    delivery: at-most-once
+    envelope: [event_type, source, correlation_id, stream_id, sequence, payload]
+    lifecycle: [received, validated, processing, succeeded, failed]
+    description:
+      purpose: Report a committed semantic workspace change.
+      emitted_when: Import, mapping, condition, cycle, or annotation validation has committed.
+      payload_fields: [{name: snapshot, type: WorkspaceSnapshot, meaning: Immutable workspace data for downstream use.}]
+      intended_consumers: [studio_application]
+  - id: learning.progressed
+    owner: learning_qualification
+    output_port: learning.events
+    delivery: at-most-once
+    envelope: [event_type, source, correlation_id, stream_id, sequence, payload]
+    lifecycle: [received, validated, processing, succeeded, failed]
+    description:
+      purpose: Report bounded progress without exposing mutable worker state.
+      emitted_when: A progress interval or learning stage boundary is reached.
+      payload_fields: [{name: progress, type: LearningProgress, meaning: Current stage and completed candidate count.}]
+      intended_consumers: [studio_application, desktop_adapter]
+  - id: learning.completed
+    owner: learning_qualification
+    output_port: learning.events
+    delivery: at-most-once
+    envelope: [event_type, source, correlation_id, stream_id, sequence, payload]
+    lifecycle: [received, validated, processing, succeeded, failed]
+    description:
+      purpose: Report deterministic qualification and ranking results.
+      emitted_when: Exact typed replay and fallback evaluation have completed.
+      payload_fields: [{name: result, type: QualificationResult, meaning: Ranked kernels and accepted speed coverage.}]
+      intended_consumers: [studio_application, desktop_adapter]
+  - id: profile.exported
+    owner: profile_export
+    output_port: profile.events
+    delivery: at-most-once
+    envelope: [event_type, source, correlation_id, stream_id, sequence, payload]
+    lifecycle: [received, validated, processing, succeeded, failed]
+    description:
+      purpose: Report that the selected profile header was saved.
+      emitted_when: The file adapter confirms the complete write.
+      payload_fields: [{name: path, type: string, meaning: Saved header path.}]
+      intended_consumers: [studio_application, desktop_adapter]
+types:
+  - id: workspace-snapshot
+    owner: data_workspace
+    language: python
+    declaration: {path: src/dual_imu_collision_studio/domain/data_workspace/model.py, symbol: WorkspaceSnapshot, kind: class}
+    visibility: cross-module
+    semantic_kind: domain-value
+    description: Immutable recordings, conditions, cycles, and annotations accepted for learning.
+    lifetime: One in-memory application session.
+    mutability: immutable
+    mutation_authority: []
+    consumers: [studio_application]
+    references: []
+    fields:
+      - {name: recordings, type: tuple, role: domain-value, meaning: Validated semantic recordings and annotation partitions.}
+  - id: learning-request
+    owner: learning_qualification
+    language: python
+    declaration: {path: src/dual_imu_collision_studio/domain/learning/model.py, symbol: LearningRequest, kind: class}
+    visibility: cross-module
+    semantic_kind: command
+    description: Immutable input required to fit and qualify a bounded candidate grid.
+    lifetime: One learning run.
+    mutability: immutable
+    mutation_authority: []
+    consumers: [studio_application, learning_qualification]
+    references: []
+    fields:
+      - {name: workspace, type: object, role: domain-value, meaning: Application-mapped arrays and event truth.}
+      - {name: numeric_type, type: str, role: policy, meaning: Exact float32 or float64 replay target.}
+  - id: qualification-result
+    owner: learning_qualification
+    language: python
+    declaration: {path: src/dual_imu_collision_studio/domain/learning/model.py, symbol: QualificationResult, kind: class}
+    visibility: cross-module
+    semantic_kind: domain-value
+    description: Ranked kernels, latency evidence, training ranges, and qualified speed ranges.
+    lifetime: From completed learning until application exit.
+    mutability: immutable
+    mutation_authority: []
+    consumers: [studio_application]
+    references: []
+    fields:
+      - {name: candidates, type: tuple, role: domain-value, meaning: Deterministically ranked qualified candidates.}
+  - id: profile-export-request
+    owner: profile_export
+    language: python
+    declaration: {path: src/dual_imu_collision_studio/domain/profile_export/model.py, symbol: ProfileExportRequest, kind: class}
+    visibility: cross-module
+    semantic_kind: command
+    description: Qualified semantic profile and requested header output options.
+    lifetime: One export operation.
+    mutability: immutable
+    mutation_authority: []
+    consumers: [studio_application, profile_export]
+    references: []
+    fields:
+      - {name: profile, type: object, role: domain-value, meaning: Application-mapped qualified detector profile.}
+      - {name: language, type: str, role: policy, meaning: C99 or C++17 output target.}
+type_exclusions: []
+state_objects: []
+boundary_mappings:
+  - id: workspace-to-learning
+    interaction: Convert a committed workspace snapshot into an immutable learning request.
+    producer: data_workspace
+    consumer: learning_qualification
+    parent: studio_application
+    producer_contract: workspace-snapshot
+    consumer_contract: learning-request
+    mapping_owner: studio_application
+    state_objects: []
+    allowed_edges: ["studio_application->data_workspace", "studio_application->learning_qualification"]
+    forbidden_edges: ["data_workspace->learning_qualification", "learning_qualification->data_workspace"]
+  - id: qualification-to-export
+    interaction: Convert the selected qualified candidate into a semantic profile export command.
+    producer: learning_qualification
+    consumer: profile_export
+    parent: studio_application
+    producer_contract: qualification-result
+    consumer_contract: profile-export-request
+    mapping_owner: studio_application
+    state_objects: []
+    allowed_edges: ["studio_application->learning_qualification", "studio_application->profile_export"]
+    forbidden_edges: ["learning_qualification->profile_export", "profile_export->learning_qualification"]
+flows:
+  - id: prepare-workspace
+    owner: data_workspace
+    description: Import recordings and produce a validated annotated workspace.
+    trigger: {kind: command, ref: workspace.command, description: The user advances the import or annotation workflow.}
+    steps:
+      - id: prepare-workspace.step-1
+        order: 1
+        module: data_workspace
+        action: Validate mapping, samples, test conditions, cycles, and interval partition rules.
+        receives: [workspace.command, workspace.tabular-input]
+        emits: [workspace.changed]
+        state_changes: []
+        side_effects: []
+    success: {result: A complete immutable workspace snapshot is available., events: [workspace.changed]}
+    errors: []
+  - id: learn-and-qualify
+    owner: learning_qualification
+    description: Fit candidate kernels and qualify exact target replay across all supplied speeds.
+    trigger: {kind: command, ref: learning.command, description: The user presses Start Learning after readiness checks pass.}
+    steps:
+      - id: learn-and-qualify.step-1
+        order: 1
+        module: learning_qualification
+        action: Fit and replay candidates, emit progress, and rank universal or retained fallback kernels.
+        receives: [learning.command]
+        emits: [learning.progressed, learning.completed]
+        state_changes: []
+        side_effects: []
+    success: {result: Ranked qualification results identify the widest valid speed range., events: [learning.completed]}
+    errors: []
+  - id: export-profile
+    owner: profile_export
+    description: Generate and save one qualified collision profile header.
+    trigger: {kind: command, ref: profile.command, description: The user exports the selected qualified kernel.}
+    steps:
+      - id: export-profile.step-1
+        order: 1
+        module: profile_export
+        action: Validate the qualified profile, render deterministic header text, and request a file write.
+        receives: [profile.command]
+        emits: [profile.exported]
+        state_changes: []
+        side_effects: [Write one user-selected header file through profile.file-output.]
+    success: {result: A C99 or C++17 profile header is saved., events: [profile.exported]}
+    errors: []
+adr_exceptions: []
+c_analyzer:
+  ast:
+    status: not-applicable
+    rationale: Product implementation is Python and QML; generated C/C++ headers are verified development artifacts, not governed translation units.
+  functional_boundary:
+    status: not-applicable
+    rationale: There are no maintained C/C++ adapter source files.
+    forbidden_includes: []
+    forbidden_symbols: []
+  forbidden_public_includes: []
+  forbidden_public_symbols: []
+  forbidden_source_symbols: []
+python_analyzer:
+  status: required
+  rationale: The maintained product implementation is Python and requires complete AST evidence.
+workloads:
+  - id: interactive-workspace
+    flow: prepare-workspace
+    steps: [prepare-workspace.step-1]
+    timing_class: best-effort
+    activation: {kind: command}
+    data: {volume: Up to 50 recordings and 10 million total rows, with viewport-bounded rendering.}
+    budgets:
+      - {metric: interaction_latency_p95, operator: "<=", threshold: 100, unit: ms, method: Windows application benchmark}
+  - id: analysis-run
+    flow: learn-and-qualify
+    steps: [learn-and-qualify.step-1]
+    timing_class: best-effort
+    activation: {kind: command}
+    data: {volume: A bounded candidate grid over the validated annotated workspace.}
+    budgets:
+      - {metric: progress_interval, operator: "<=", threshold: 500, unit: ms, method: worker integration test}
+      - {metric: cancellation_observation, operator: "<=", threshold: 2, unit: s, method: worker integration test}
+  - id: profile-write
+    flow: export-profile
+    steps: [export-profile.step-1]
+    timing_class: best-effort
+    activation: {kind: command}
+    data: {volume: One generated header file.}
+    budgets: []
+execution_profiles:
+  - id: windows-desktop
+    status: proposed
+    assurance_scope: [functional-compatibility, performance]
+    target:
+      platform: Windows 10 or Windows 11 x64
+      cpu: Four or more logical CPU cores
+      runtime: Python 3.11+ with PySide6 Qt Quick
+      compiler: Python interpreter; generated headers target external C99 or C++17 compilers
+      cache_topology: {}
+      scheduler_capabilities: [Operating-system preemptive threads, Qt queued signals]
+execution_units:
+  - id: qt-ui-thread
+    profile: windows-desktop
+    kind: event-loop
+    priority: operating-system-default
+    affinity: []
+    concurrency: 1
+    resources: {memory: Viewport data and immutable presentation snapshots only.}
+    blocking: Bounded local UI and file-dialog operations only.
+    allocation: Python and Qt runtime managed.
+  - id: analysis-worker
+    profile: windows-desktop
+    kind: worker-pool
+    priority: operating-system-default
+    affinity: []
+    concurrency: 1
+    resources: {memory: Preflight capped at 60 percent of currently available RAM.}
+    blocking: Bounded local dataset reads and cooperative cancellation points.
+    allocation: Python runtime managed with chunk-bounded temporary arrays.
+execution_mappings:
+  - id: workspace-ui-map
+    profile: windows-desktop
+    workload: interactive-workspace
+    steps: [prepare-workspace.step-1]
+    units: [qt-ui-thread]
+    serialization: Qt event loop serializes committed UI state changes.
+    reentrant: false
+    activation: user command
+    wcet: Not established; p95 is measured by application benchmarks.
+  - id: analysis-worker-map
+    profile: windows-desktop
+    workload: analysis-run
+    steps: [learn-and-qualify.step-1]
+    units: [analysis-worker]
+    serialization: One active learning run; progress snapshots cross to the UI by queued signal.
+    reentrant: false
+    activation: Start Learning command
+    wcet: Data-dependent and bounded by candidate grid, row limits, and cancellation checks.
+  - id: profile-ui-map
+    profile: windows-desktop
+    workload: profile-write
+    steps: [export-profile.step-1]
+    units: [qt-ui-thread]
+    serialization: One user-approved save operation.
+    reentrant: false
+    activation: export command
+    wcet: Not established for local filesystem output.
+execution_channels:
+  - id: worker-ui-progress
+    profile: windows-desktop
+    from_unit: analysis-worker
+    to_unit: qt-ui-thread
+    contract_refs: [learning.progressed, learning.completed]
+    capacity: 2
+    ordering: FIFO per event type
+    copy_policy: immutable snapshot copy
+    timeout_ms: 0
+    overload: coalesce
+data_access_profiles: []
+microarchitecture_profiles: []
+platform_variants:
+  - id: windows-desktop-minimum
+    profile: windows-desktop
+    units: [qt-ui-thread, analysis-worker]
+    data_access_profiles: []
+    microarchitecture_profiles: []
+    parameters: {minimum_logical_cores: 4, minimum_ram_gb: 8, maximum_ram_fraction: 0.60}
+    release: false
+realtime_scheduling_studies: []
+validation_profiles:
+  - id: windows-application-validation
+    applicability: required
+    rationale: SPEC-0001 makes Windows runtime, responsiveness, memory, cancellation, and generated-header compatibility claims.
+    target_claims: [Windows 10 and 11 startup, UI responsiveness, worker progress and cancellation, memory preflight, C99 and C++17 header compilation]
+    evidence_plan: tests and bounded Windows application smoke/performance evidence recorded before release
+adoption:
+  schema_version: "2.2.0"
+  project_stage: new
+  applicable_analyzers: [python]
+  runtime_validation:
+    applicability: required
+    rationale: The desktop release has explicit Windows runtime and performance acceptance claims.
+  tool_host_evidence:
+    operating_systems: [windows]
+    python_versions: ["3.11", "3.12", "3.13"]

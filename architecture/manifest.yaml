@@ -1,0 +1,4798 @@
+standard_version: 2.2.0
+schema_version: 2.2.0
+project:
+  name: dual-imu-collision-studio
+  documentation_language: en
+source_sets:
+- id: product-source
+  classification: production
+  include:
+  - src/**
+  exclude: []
+  purpose: Govern maintained Python and QML product source.
+  provenance: Human-reviewed implementation of SPEC-0001.
+- id: development-source
+  classification: development
+  include:
+  - tests/**
+  - specs/**
+  - spec-governance/**
+  - pyproject.toml
+  - README.md
+  exclude: []
+  purpose: Keep tests, specification evidence, and packaging metadata outside product ownership.
+  provenance: Project development material.
+- id: derived-architecture
+  classification: derived-documentation
+  include:
+  - architecture/generated/**
+  - architecture/ARCHITECTURE.md
+  exclude: []
+  purpose: Keep deterministic architecture views outside product ownership.
+  provenance: Architecture renderer output.
+- id: build-output
+  classification: build-output
+  include:
+  - build/**
+  - dist/**
+  - .pytest_cache/**
+  - '**/__pycache__/**'
+  exclude: []
+  purpose: Exclude generated build and interpreter output.
+  provenance: Python and packaging tools.
+modules:
+- id: studio_application
+  level: L0
+  role: composition
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/app.py
+  - src/dual_imu_collision_studio/adapters/desktop/controller.py
+  parent: null
+  depends_on:
+  - data_workspace
+  - process_diagnostics
+  - learning_qualification
+  - project_session
+  - profile_export
+  - desktop_adapter
+  - history_worker_adapter
+  - project_file_adapter
+  - tabular_adapter
+  implements_ports: []
+  description:
+    purpose: Compose the desktop workflow, own annotation edit history, map immutable results between
+      sibling domains, coordinate durable project reopen/save, and dispatch recording-only Replay evidence
+      and model artifacts to bounded background exports.
+    input_ports: []
+    output_ports:
+    - replay.events
+    emitted_events:
+    - replay.exported
+    - replay.export-failed
+    - model.exported
+    - model.export-failed
+    owned_state: []
+    side_effects:
+    - description: Start the Qt application and coordinate bounded background work.
+    - description: Publish bounded process-lifecycle and Learning diagnostics through the application-owned
+        diagnostics port.
+    errors: []
+    invariants:
+    - Sibling domains communicate only through application-owned mappings.
+    - Exactly one release composition root exists.
+    - The QML engine retains the StudioController for the complete main-window lifetime.
+    - QML coordinates are converted to sample indexes before domain validation.
+    - Provisional annotation edits never enter Learning until the complete set is confirmed.
+    - The application owns the session-local speed-to-template registry while data_workspace owns template
+      semantics and projection.
+    - The application restores its session-local manual annotation identity allocator above every persisted
+      manual annotation identity before accepting post-open edits.
+    - Successful reference activation clears both the primary selected annotation index and the selected-annotation
+      set before publishing the refreshed UI state.
+    - The application maps sibling-owned workspace and Profile values into project_session-owned persistence
+      values without exposing JSON representations to functional domains.
+    - Replay CSV export snapshots one selected recording and candidate, computes the complete continuous
+      recording exactly once, and streams Learning-owned ReplayEvidence off the UI thread without display
+      normalization.
+    - Model TXT export snapshots one candidate and renders every governed model parameter exactly once
+      off the UI thread.
+    - The Candidate Dashboard execution log is session-only, capped at 10,000 accepted-run entries, never
+      enters the project document or exported artifacts, and clears only on an accepted new Learning run,
+      a direct session reset, or successful Open project replacement. Pointer presence anywhere inside
+      the Execution Log pane pauses automatic following; pointer exit immediately positions the viewport
+      at the newest entry, and log or layout updates keep the newest entry visible while the pointer is
+      outside.
+    - Opening a completed project reconstructs selected-kernel per-recording Qualification evidence from
+      the fingerprint-validated supplied recordings and persisted frozen Profile without changing the
+      project schema; the Replay table preserves PASS, FAIL, and COVERAGE_GAP meaning with an explicit
+      reason, and selected-kernel provenance presents discrete active and excluded supplied speeds separately
+      from Training and Qualified ranges.
+    - A cancelled Learning run commits one immutable partial result on the UI thread, remains visibly
+      Cancelled, and exposes only fully qualified candidates or, when none qualifies, the existing minimum-total-error
+      diagnostic subset in Candidate Dashboard and Analytical Replay.
+    - Recording Qualification Results maps Learning-owned chronological per-Collision Detector Score SNR
+      evidence into one display-only dB string without recomputation, status changes, persistence, or
+      export.
+    - Selected-kernel presentation exposes the Learning-owned stored Kernel Loss as Training loss without
+      recomputation, uses N/A when historical evidence is unavailable, and shares one packaged DI icon
+      between the in-app header and application-level window identity; Windows startup assigns the stable
+      explicit DualIMU.CollisionStudio AppUserModelID before QGuiApplication construction so pythonw.exe
+      launches retain the DI taskbar identity.
+    - Completing Mapping Wizard preserves the Recordings ListView pixel viewport across the controller
+      snapshot refresh and clamps it only when refreshed content makes the prior position invalid.
+    - The parent maps frozen MLP layers to inert project data; model-family settings and results survive
+      reopen without model retraining.
+    - Mapping inventories per-IMU raw or filtered XYZ independently of algorithm selection. Training captures
+      per-algorithm sources, rejects the complete requested batch on any incompatible recording, runs
+      compatible methods serially in the existing analysis worker, and retains frozen result/source identity
+      for replay and project reopen (SPEC-0033).
+  entrypoints:
+  - path: src/dual_imu_collision_studio/app.py
+    symbol: main
+    kind: function
+  public_symbols:
+  - path: src/dual_imu_collision_studio/app.py
+    symbol: main
+    kind: function
+  - path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: StudioController
+    kind: class
+- id: process_diagnostics
+  level: L1
+  role: domain
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/domain/process_diagnostics
+  parent: studio_application
+  depends_on: []
+  implements_ports: []
+  description:
+    purpose: Define privacy-bounded process and Learning diagnostic records independently of persistence
+      technology.
+    input_ports: []
+    output_ports:
+    - diagnostics.output
+    emitted_events: []
+    owned_state: []
+    side_effects: []
+    errors: []
+    invariants:
+    - Diagnostic contracts never contain waveform rows, annotations, or model coefficients.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+    symbol: DiagnosticsPort
+    kind: protocol
+  public_symbols:
+  - path: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+    symbol: DiagnosticsPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/process_diagnostics/model.py
+    symbol: DiagnosticStatus
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+    symbol: NullDiagnostics
+    kind: class
+- id: data_workspace
+  level: L1
+  role: domain
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/domain/data_workspace
+  parent: studio_application
+  depends_on: []
+  implements_ports: []
+  description:
+    purpose: Own imported recordings, mappings, test conditions, cycles, annotations, and derived Normal
+      regions.
+    input_ports:
+    - workspace.command
+    output_ports:
+    - workspace.tabular-input
+    - workspace.events
+    emitted_events:
+    - workspace.changed
+    owned_state: []
+    side_effects: []
+    errors: []
+    invariants:
+    - Collision truth is determined only by waveform interval annotation.
+    - Normal regions are derived and read-only.
+    - After annotation confirmation, derived Normal regions exclude each Collision onset-through-150-ms
+      inclusive response window, clipped at the containing Cycle, without changing the user's persisted
+      Collision interval. Existing confirmation validation rejects Cycles that cross a true acquisition
+      discontinuity; the derivation also defensively stops a response window at the first such discontinuity.
+    - Every valid Cycle matches its reference template's non-negative Pick, Put, and Fork Collision count
+      tuple; each class may be absent, but the total event count is at least one.
+    - Use as Reference atomically confirms one valid source Cycle and its contained labels before activating
+      a template for exactly one Robot Speed.
+    - One manually confirmed destination Anchor Cycle deterministically generates remaining provisional
+      Cycles from the reference cadence before event and Ignore projection.
+    - Reference Ignore intervals retain their non-empty reasons, and every generated destination interval
+      remains provisional until explicit confirmation.
+    - Manual annotations take precedence over projected proposals and different Robot Speeds never share
+      a template.
+    - Every annotation interval has one non-empty session identity that is unique within its recording
+      and survives confirmation-state replacement.
+    - Reopening a project preserves every stored interval identity and allocates later manual interval
+      identities without collision.
+    - Ignore intervals carry a non-empty user reason.
+    - Ignore/Collision overlap invalidates annotation confirmation and Learning; half-open adjacency and
+      Ignore/Pick/Put overlap retain existing semantics.
+    - Tabular input preserves measured rows and source bytes and linearly interpolates one through three
+      missing samples on all six raw axes. The nearest nominal interval count determines missing count;
+      four missing samples or repaired periods outside inclusive two-percent tolerance reject the recording.
+    - Inserted samples carry index provenance and retain continuous FIR/detector state and ordinary activity-based
+      eligibility. Annotation views show repair positions and counts without per-gap confirmation.
+    - Internal and External IMU mappings pass selected source values through unchanged; acquisition-specific
+      transforms remain outside the application.
+    - Viewport waveform projection reads original mapped samples without mutation, uses shared contiguous
+      half-open buckets for Internal and External IMUs, and emits a pixel-bounded immutable raw or Min/Max
+      plus arithmetic-mean representation without changing annotation indexes.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
+    symbol: WorkspaceService
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: WorkspaceCommandPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: TabularInputPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: WorkspaceEventPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: WaveformViewportProjection
+    kind: class
+- id: learning_qualification
+  level: L1
+  role: domain
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/domain/learning
+  parent: studio_application
+  depends_on: []
+  implements_ports: []
+  description:
+    purpose: Fit independently selected FIR and custom-depth MLP candidates, retain original fold kernels
+      and replay exact frozen predictions across supplied conditions.
+    input_ports:
+    - learning.command
+    - learning.replay-export
+    - learning.model-export
+    output_ports:
+    - learning.events
+    - learning.history-execution
+    - learning.execution
+    - learning.replay-file-output
+    - learning.model-file-output
+    emitted_events:
+    - learning.progressed
+    - learning.completed
+    - learning.cancelled
+    owned_state: []
+    side_effects: []
+    errors: []
+    invariants:
+    - Qualification always replays all supplied speeds.
+    - Qualification always replays all supplied offsets, including offsets excluded from subsequent fitting
+      rounds.
+    - Every supplied speed and offset tuple retains exact activity denominators, false-trigger counts,
+      collision detections, latency, and status provenance.
+    - Every completed per-recording Qualification result retains all Collision Detector Score SNR values
+      in chronological order. Signal is the finite Score peak in the existing inclusive 150-ms response
+      window; shared noise is finite Score RMS outside annotated Collision and Ignore intervals. Invalid
+      positive finite ratios remain unavailable and never change Qualification decisions.
+    - SPEC-0011 uses configurable two-to-ten complete-Cycle folds, default three. Each recording has at
+      least two valid Cycles; each condition has at least N. Every fold retains Training from every recording
+      and Validation from every condition with per-condition counts differing by at most one. Counts/allocation
+      failure stops the run; no automatic N reduction.
+    - Each Start captures new settings and seed; each round captures a balanced fold map reused by every
+      parameter candidate. Common Training and Validation targets support 128 ms History and exclude Collision
+      and Ignore. Missing common targets skip the round without resampling or lowering History.
+    - Candidate Loss is the maximum across conditions of the equal-fold average of Validation MSE, or
+      the default half Training plus half Validation MSE. Target-cast original fold models supply prediction
+      and subtraction before float64 squaring. Residual STD uses only final fitting rows.
+    - Search jointly optimizes tap depth through 128 ms and continuous Ridge alpha from 1e-6 to 100; integer
+      K from 2 to 32 is active only with optional Robust refit, default off. Coarse top two plus raw ties
+      seed fine search. Neighbors project to bounds before deduplication; final steps are one tap, one
+      K, and alpha factor 1.05 with configured relative improvement tolerance. All paths complete; each
+      effective parameter/fold runs once per context.
+    - Fixed-grid mode accepts only checked 4/8/16/32/64/128 ms History aliases and checked 1e-6/1e-4/0.01/1/100
+      Ridge alphas, deduplicates equal effective taps while preserving aliases, fixes Robust K to zero,
+      and performs no coarse or fine search. Its effective Cartesian-product points reuse the same grouped
+      N-fold Loss ranking, Validation allowance, fold-kernel selection, Qualification and fallback path
+      as optimized mode; evaluated nonwinning points remain visible as CV-rejected evidence.
+    - All valid parameters within the configured relative convergence tolerance of the minimum raw Parameter
+      Loss are retained. Per-condition raw Validation allowance filters their original fold kernels, then
+      each parameter retains every fold whose raw maximum-condition Kernel Loss exactly equals that parameter's
+      raw minimum; rounded and second-place near ties are excluded. Every admitted parameter and fold
+      completes Qualification before ranking. No final all-data refit or worse-parameter rescue occurs.
+    - A passing collision detection has latency no greater than 150 ms from the confirmed collision interval
+      start, inclusive, regardless of interval end.
+    - A recording passes when at least one Collision interval exists, every Collision is detected within
+      the inclusive 150 ms onset deadline, and every present Normal, Pick, or Put interval has zero false
+      triggers. A missing Normal, Pick, or Put class is neutral; missing Collision evidence is COVERAGE_GAP.
+    - A retained fallback is accepted only when its training range equals its qualified range.
+    - Each outer round trains all remaining offsets and exhausts lowest-speed removal until the active
+      range passes or only one speed remains. Success or exhaustion then excludes the smallest active
+      offset and restores all supplied speeds.
+    - Only full active-range matches enter the qualified pool. Ranking prefers more supplied speed strata,
+      more active offsets, shorter taps, lower worst latency, larger robustness margin, then stable parameter
+      order (SPEC-0008; ALG-0004).
+    - Proven insufficient Training evidence skips only that round, preserves earlier retained winners,
+      and continues suffix/offset progression. Unavailable scopes and reasons remain in progress and completed
+      results; unclassified empty models and input/resource/unexpected execution failures are not missing
+      evidence. Narrowly classified candidate numerical failures invalidate that full-N parameter configuration
+      with parameter and fold diagnostics; they never fabricate Loss.
+    - SPEC-0009 derives per-model N as the maximum of active-round Normal interval maxima and C as the
+      minimum of active-round per-Collision window maxima. Collision uses its inclusive onset-through-150-ms
+      window excluding Ignore. Search starts at N with step 0.5 and includes C, omits zero and duplicate
+      target values, and never expands the bounds. Qualification still requires every labeled Collision
+      to be detected.
+    - Qualification, Replay, and exported Profile semantics use the strict detector predicate Score greater
+      than Threshold; equality does not fill confirmation history. Release and re-arm remain strictly
+      below release_ratio times Threshold.
+    - Collision response evidence is the fixed onset-through-150-ms window minus Ignore samples. Preserve
+      timestamps and retain eligible samples after Ignore; do not extend or shorten the absolute deadline,
+      compress time, or reset detector state. Actual Collision annotations still cannot overlap Ignore.
+    - Derived Normal evidence and Collision acceptance evidence use the same onset-through-150-ms boundary,
+      so one sample cannot belong to both classes for the same Collision.
+    - Missing whole-round bound evidence skips that round; C below N or no positive candidates skips that
+      model with bounds and reason. Existing fallback and earlier qualified results are retained. Numerical
+      failures are never evidence shortages.
+    - For one fixed History, frozen model, target numeric type, Score Mode, and recording, normalized
+      detector scores are computed once and reused across Threshold and Confirmation candidates without
+      crossing the frozen-fold-kernel lifetime.
+    - Diagnostic ranking compares retained selected fold-kernel results over every supplied recording
+      by total false trigger events plus missed collision intervals, then finite worst collision latency,
+      retaining all exact ties.
+    - Diagnostic-only winners are never exportable Profiles.
+    - Replay CSV serialization preserves full-resolution sample alignment and emits the exact governed
+      diagnostic header order without substituting display-only zeroes.
+    - Training uses only Cycle-contained Normal Robot Motion, Robot Pick, and Robot Put samples; Collision,
+      Ignore, and Cycle-external samples are excluded and split FIR history.
+    - Replay prediction and detector arithmetic start at the first sample with unavailable Internal FIR
+      history initialized to zero. Numeric startup scores participate normally; successfully interpolated
+      gaps preserve FIR and detector continuity.
+    - Ignore never resets or pauses detector state; Ignore evidence remains visible but is excluded from
+      Training and qualification pass or fail counts only.
+    - Qualification counts false triggers in every non-Ignore Normal, Pick, Put, and Cycle-external sample;
+      Cycle-external events aggregate into normal_false_events for compatibility.
+    - Model TXT serialization emits deterministic scalar metadata, FIR weights, bias, residual center,
+      and residual scale without changing stored project or profile schemas.
+    - Search and fold-selection progress publishes typed Loss evidence; every retained candidate preserves
+      the exact ordered per-recording Qualification metrics used by its condition aggregates.
+    - Cancellation retains only candidates whose complete Qualification evidence committed before cancellation
+      observation. Completed qualified candidates remain selectable; only when none qualifies does the
+      existing minimum-total-error, finite-latency, exact-tie diagnostic ranking become visible. The terminal
+      state remains Cancelled.
+    - FIR and MLP sample and select independently; model-family results retain separate seeds, fold maps
+      and immutable kernels.
+    - MLP hidden depth is a custom positive integer defaulting to two; each layer independently selects
+      widths 4,8,16,32,64,128. Only selected Cartesian combinations run; no final all-data refit.
+    - SPEC-0030 adds one-sensor Ridge self-prediction using only lags 1..L, adopted causal SOS preprocessing,
+      explicit warmup, continuous Ignore history and separate frozen model identity.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/domain/learning/service.py
+    symbol: LearningService
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningCommandPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningEventPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: HistoryExecutionPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: ReplayCsvFilePort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: ModelTextFilePort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/learning/service.py
+    symbol: LearningService
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningExecutionPort
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/learning/self_imu.py
+    symbol: service_for_dataset
+    kind: function
+- id: profile_export
+  level: L1
+  role: domain
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/domain/profile_export
+  parent: studio_application
+  depends_on: []
+  implements_ports: []
+  description:
+    purpose: Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header
+      artifact.
+    input_ports:
+    - profile.command
+    output_ports:
+    - profile.file-output
+    - profile.events
+    emitted_events:
+    - profile.exported
+    owned_state: []
+    side_effects: []
+    errors: []
+    invariants:
+    - Every artifact contains one Profile struct, exact target numeric constants, and a machine-readable
+      strict Score-greater-than-Threshold detector contract.
+    - Default file names are stable dual_imu_collision_profile_kNNN.h names.
+    - Every Profile records kernel depth, worst latency, three robustness margins, covered and excluded
+      offsets, qualified speed interval, and exact condition tuples.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/domain/profile_export/service.py
+    symbol: ProfileExportService
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileCommandPort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileFilePort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileEventPort
+    kind: protocol
+- id: project_session
+  level: L1
+  role: domain
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/domain/project_session
+  parent: studio_application
+  depends_on: []
+  implements_ports: []
+  description:
+    purpose: Own the versioned semantic project document, source-integrity rules, and transactional reopen/save
+      contract.
+    input_ports:
+    - project.command
+    output_ports:
+    - project.file-storage
+    emitted_events: []
+    owned_state: []
+    side_effects: []
+    errors: []
+    invariants:
+    - Project documents never embed waveform sample arrays.
+    - Every referenced source is identified by path, byte size, and SHA-256 before restored annotations
+      can be committed.
+    - In-progress Learning state is never represented as a resumable checkpoint.
+    - Completed retained Profiles are optional and version-bound.
+    - New-contract project documents accept finite positive data-derived Profile thresholds and restore
+      exact interpolation provenance with source identity checks; old-project migration is outside SPEC-0009.
+    - Editable Training mode and fixed-grid selections persist independently from immutable completed-run
+      provenance. Pre-extension editable settings default to fixed-grid with empty selections, while legacy
+      captured runs restore as optimized provenance without changing retained results.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/domain/project_session/service.py
+    symbol: ProjectSessionService
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/domain/project_session/contracts.py
+    symbol: ProjectFilePort
+    kind: protocol
+  - path: src/dual_imu_collision_studio/domain/project_session/service.py
+    symbol: ProjectSessionService
+    kind: class
+- id: desktop_adapter
+  level: L3+
+  role: adapter
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/adapters/desktop/diagnostics.py
+  - src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
+  - src/dual_imu_collision_studio/adapters/desktop/profile_writer.py
+  - src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+  - src/dual_imu_collision_studio/qml
+  parent: null
+  depends_on:
+  - process_diagnostics
+  - profile_export
+  - learning_qualification
+  implements_ports:
+  - diagnostics.output
+  - profile.file-output
+  - learning.replay-file-output
+  - learning.model-file-output
+  description:
+    purpose: Present the Qt Quick interface, execute analysis and large artifact exports off the UI thread,
+      and atomically write approved header, Replay CSV, and Model TXT artifacts.
+    input_ports: []
+    output_ports: []
+    emitted_events: []
+    owned_state:
+    - ref: recordings-viewport-before-wizard
+      name: Recordings viewport before Wizard
+      description: Import-page-local pixel viewport captured before Mapping Wizard opens and consumed
+        only after successful completion.
+    - ref: mapping-wizard-validation-error
+      name: Mapping Wizard validation error
+      description: Wizard-local recoverable validation feedback replaced on Next or Finish and cleared
+        when relevant input changes.
+    side_effects:
+    - description: Read user gestures, update QML view state, schedule worker jobs, and write selected
+        files.
+    - description: Persist rotated privacy-bounded process, Qt/QML, and Learning diagnostic evidence.
+    errors: []
+    invariants:
+    - Qt framework types never enter L1 public contracts.
+    - Long analysis never runs on the UI thread.
+    - Waveform scene-graph textures are invalidated when channel data, the shared annotation viewport,
+      or item dimensions change.
+    - Annotate and Classify renders raw polylines when visible samples fit the plot width and otherwise
+      renders one thin vertical Min/Max stroke per shared sample bucket and channel overlaid with a continuous
+      same-color arithmetic-mean polyline.
+    - Active central-drag interval delegates stay visible until release or cancellation so transient
+      endpoint binding order cannot cancel the gesture; plot clipping and controller boundary policy
+      remain authoritative. Both IMU overlays share this rule; annotation lanes retain their existing
+      shared gesture state and viewport visibility policy.
+    - Shared control sizing is sourced from centralized QML design tokens.
+    - Mapping Wizard validates the current step only when Next or Finish is invoked, keeps the active
+      step and inputs unchanged on failure, and presents every recoverable configuration, mapping, source-data,
+      or file-read error inside the active Wizard.
+    - Each software-filtered IMU mapping presents one shared slot as Calculate filter, then Adopt design,
+      then a non-interactive Design adopted label. Relevant edits reset preview and adoption; Next
+      reports missing adoption without advancing. The slot uses actual control content dimensions and
+      minimum sizes so action and status captions remain fully visible with scaled fonts.
+    - SPEC-0036 filter editors copy all values from the same IMU most recently focused or edited stage;
+      templateIndex tracks that stage through moves and resets on load or template deletion. High / Low
+      pass displays the inferred direction from passband versus stopband edges; invalid drafts cannot
+      be adopted. Stored designs retain explicit highpass or lowpass kinds.
+    - SPEC-0037 remembers only the latest explicitly adopted parameter snapshot across IMUs and recordings
+      for the window lifetime. Entering a sensor page prefills only blank/default editor values; existing
+      drafts and saved settings win. Source columns, mode, coefficients and adoption are not copied;
+      every target recalculates at its own sample rate. Loading and previewing do not replace the template.
+    - Diagnostic persistence never contains source waveform rows, annotation payloads, or model coefficients.
+    - Replay CSV writes use a same-folder temporary file and atomic replacement; a failed write preserves
+      the previous destination.
+    - Model TXT writes use a same-folder temporary file and atomic replacement; a failed write preserves
+      the previous destination.
+    - The Recordings ListView viewport capture is private to the QML desktop adapter, is overwritten on
+      each Wizard open, and is restored only after successful Wizard completion with legal-range clamping.
+    - Sensor mapping has independent per-IMU mutually exclusive existing-filtered/software-filtering options
+      with raw bypass. Training names the three methods formally and keeps hover explanations available
+      even when an algorithm is unavailable.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
+    symbol: WaveformItem
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/adapters/desktop/diagnostics.py
+    symbol: ProcessDiagnostics
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
+    symbol: WaveformItem
+    kind: class
+  - path: src/dual_imu_collision_studio/qml/PaddedButton.qml
+    symbol: PaddedButton
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/profile_writer.py
+    symbol: AtomicProfileWriter
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicReplayCsvWriter
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicModelTextWriter
+    kind: class
+- id: history_worker_adapter
+  level: L3+
+  role: adapter
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/adapters/parallel/history_workers.py
+  - src/dual_imu_collision_studio/adapters/parallel/learning_workers.py
+  parent: null
+  depends_on:
+  - learning_qualification
+  implements_ports:
+  - learning.history-execution
+  - learning.execution
+  description:
+    purpose: Execute immutable candidate-fold or complete-recording jobs in bounded reusable Windows spawn
+      workers. Legacy History execution remains available only for compatibility tests; Start Learning
+      uses learning.execution.
+    input_ports: []
+    output_ports: []
+    emitted_events: []
+    owned_state: []
+    side_effects:
+    - description: Spawn, monitor, join, or terminate at most eight search workers or four Qualification
+        workers and sample aggregate process-tree RSS.
+    errors: []
+    invariants:
+    - Process handles, IPC objects, tracebacks, and multiprocessing framework types never cross into L1
+      contracts.
+    - Successful results are returned in requested job order rather than process completion order.
+    - Explicit MemoryError terminates all workers without retry.
+    - MLP admission uses Learning-owned fold evidence counts and phase allocation estimates, retaining
+      full dataset copies per worker and calibrated process overhead. It reports bounded per-fold and
+      batch breakdowns through existing progress and error paths. Matrix allocation and training math
+      are unchanged. Admission refusals identify History, concurrency, estimated demand, current budget
+      and shortfall in decimal GB, retaining exact-byte details and explicitly distinguishing estimates
+      from measured peaks.
+    - Active Learning execution uses a default 90 percent system-wide physical RAM ceiling. MLP admission
+      compares estimated additional batch bytes with current available bytes minus 10 percent of total
+      RAM; runtime checks refresh total and available bytes and stop above the ceiling. Process-tree RSS
+      remains diagnostic evidence, not the admission or runtime budget. Checks are sampled, not a hard
+      allocation cap. Legacy History execution retains its old policy.
+    - New Learning worker startup failure or unexpected exit is terminal with zero retries; cancellation
+      and memory failure clean up the whole batch. The isolated legacy History adapter retains its old
+      contract.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/adapters/parallel/history_workers.py
+    symbol: SpawnHistoryExecutor
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/adapters/parallel/history_workers.py
+    symbol: SpawnHistoryExecutor
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/parallel/learning_workers.py
+    symbol: SpawnLearningExecutor
+    kind: class
+- id: project_file_adapter
+  level: L3+
+  role: adapter
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/adapters/desktop/project_store.py
+  parent: null
+  depends_on:
+  - project_session
+  implements_ports:
+  - project.file-storage
+  description:
+    purpose: Implement strict .dicsproj JSON I/O, atomic replacement, and external source-file identity
+      hashing.
+    input_ports: []
+    output_ports: []
+    emitted_events: []
+    owned_state: []
+    side_effects:
+    - description: Read project and source files and atomically replace a user-selected project file.
+    errors: []
+    invariants:
+    - Duplicate JSON keys, non-finite values, executable objects, and incompatible roots are rejected.
+    - A failed write never replaces the prior destination.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/adapters/desktop/project_store.py
+    symbol: AtomicProjectStore
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/adapters/desktop/project_store.py
+    symbol: AtomicProjectStore
+    kind: class
+- id: tabular_adapter
+  level: L3+
+  role: adapter
+  implementation_status: implemented
+  paths:
+  - src/dual_imu_collision_studio/adapters/tabular
+  parent: null
+  depends_on:
+  - data_workspace
+  implements_ports:
+  - workspace.tabular-input
+  description:
+    purpose: Decode CSV and XLSX files into demand-owned semantic columns and samples.
+    input_ports: []
+    output_ports: []
+    emitted_events: []
+    owned_state: []
+    side_effects:
+    - description: Read selected local CSV and XLSX files.
+    errors: []
+    invariants:
+    - Adapter-specific dataframe or workbook types never cross into the data domain.
+    - Header and Data Start Row proposals remain provisional until Mapping Wizard confirmation.
+    - Internal and External IMU axes use the same direct XYZ mapping interaction.
+    - Contiguous trailing rows without all mapped inputs are excluded with exact warnings; an interior
+      mapped-value gap remains a blocking error.
+  entrypoints:
+  - path: src/dual_imu_collision_studio/adapters/tabular/reader.py
+    symbol: TabularReader
+    kind: class
+  public_symbols:
+  - path: src/dual_imu_collision_studio/adapters/tabular/reader.py
+    symbol: TabularReader
+    kind: class
+composition_roots:
+- id: desktop-release
+  module: studio_application
+  path: src/dual_imu_collision_studio/app.py
+  symbol: main
+  purpose: Compose one complete Dual IMU Collision Studio desktop release.
+  source_set: product-source
+  kind: release
+ports:
+- id: project.command
+  owner: project_session
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/project_session/service.py
+  implemented_by: []
+  description:
+    purpose: Validate a complete semantic project document for save or transactional reopen.
+    data: Versioned project identity, source references, mappings, annotations, templates, UI selection,
+      and optional completed Profiles.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-project
+      condition: The semantic project is incomplete, inconsistent, unsupported, or references a source
+        without exact integrity evidence.
+  symbols:
+  - ProjectSessionService
+- id: project.file-storage
+  owner: project_session
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/project_session/contracts.py
+  implemented_by:
+  - project_file_adapter
+  description:
+    purpose: Read or atomically replace one strict UTF-8 JSON .dicsproj artifact and compute source-file
+      identity.
+    data: ProjectDocument values and source path fingerprints; no waveform samples or framework handles.
+    timing: sync
+    immediate_rejections:
+    - code: project-io-failed
+      condition: Parsing, hashing, validation, or atomic replacement cannot complete safely.
+  symbols:
+  - ProjectFilePort
+- id: workspace.command
+  owner: data_workspace
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+  implemented_by: []
+  description:
+    purpose: Import, configure, annotate, or validate workspace data.
+    data: Semantic recording, mapping, condition, atomic reference activation, destination Anchor Cycle,
+      cadence generation, and same-speed annotation projection commands.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-workspace-command
+      condition: Command violates a workspace invariant.
+  symbols:
+  - WorkspaceCommandPort
+- id: workspace.tabular-input
+  owner: data_workspace
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+  implemented_by:
+  - tabular_adapter
+  description:
+    purpose: Read selected tabular data through a domain-owned contract.
+    data: Column names, row values, and source metadata.
+    timing: sync
+    immediate_rejections:
+    - code: unreadable-table
+      condition: The selected file cannot be decoded safely.
+  symbols:
+  - TabularInputPort
+- id: workspace.events
+  owner: data_workspace
+  direction: output
+  kind: event
+  contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+  implemented_by: []
+  description:
+    purpose: Publish a committed workspace snapshot.
+    data: Immutable semantic workspace snapshot.
+    timing: sync
+    immediate_rejections: []
+  symbols:
+  - WorkspaceEventPort
+- id: learning.command
+  owner: learning_qualification
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by: []
+  description:
+    purpose: Start or cancel one bounded learning and qualification run.
+    data: Workspace snapshot, numeric type, captured Training mode, mode-specific candidate policy, grouped-CV
+      settings, and memory limit.
+    timing: async
+    immediate_rejections:
+    - code: learning-not-ready
+      condition: Required setup or annotations are incomplete.
+  symbols:
+  - LearningCommandPort
+- id: learning.events
+  owner: learning_qualification
+  direction: output
+  kind: event
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by: []
+  description:
+    purpose: Publish learning progress and committed qualification results.
+    data: Progress stage, candidate counts, typed parameter and kernel Loss evidence, speed coverage,
+      per-recording Qualification results, qualified ranking, minimum-misjudgment diagnostic ranking,
+      selected profile, and an immutable completed-candidate snapshot when cancellation terminates accepted
+      work.
+    timing: async
+    immediate_rejections: []
+  symbols:
+  - LearningEventPort
+- id: learning.history-execution
+  owner: learning_qualification
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by:
+  - history_worker_adapter
+  description:
+    purpose: Execute the four independent requested-History jobs for one fallback round without exposing
+      process technology to Learning.
+    data: Immutable History jobs, ordered results, bounded progress, typed failures, attempt durations,
+      and process-tree Peak RSS evidence.
+    timing: async
+    immediate_rejections:
+    - code: insufficient-hardware-memory
+      condition: A child reports MemoryError or aggregate Peak RSS exceeds 85 percent of launch-time available
+        RAM.
+    - code: history-worker-failed
+      condition: A startup or abnormal process failure still fails after its one permitted retry.
+  symbols:
+  - HistoryExecutionPort
+- id: learning.replay-export
+  owner: learning_qualification
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/learning/service.py
+  implemented_by: []
+  description:
+    purpose: Render one selected candidate and complete recording as the governed full-resolution diagnostic
+      CSV schema.
+    data: Immutable ReplayEvidence containing aligned raw, FIR, residual, detector score, threshold, ratio,
+      state, and trigger values.
+    timing: async
+    immediate_rejections:
+    - code: replay-evidence-unavailable
+      condition: The selected retained kernel or recording cannot produce complete Replay evidence.
+    - code: replay-export-busy
+      condition: One Replay CSV or Model TXT artifact export is already active.
+  symbols:
+  - LearningService
+- id: learning.replay-file-output
+  owner: learning_qualification
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Atomically replace one user-selected Replay CSV destination without exposing filesystem technology
+      to Learning.
+    data: Destination path and a deterministic stream of UTF-8 CSV rows rendered from one immutable ReplayEvidence
+      value.
+    timing: sync
+    immediate_rejections:
+    - code: replay-write-failed
+      condition: The destination or same-folder temporary file cannot be written, flushed, or atomically
+        replaced.
+  symbols:
+  - ReplayCsvFilePort
+- id: learning.model-export
+  owner: learning_qualification
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/learning/service.py
+  implemented_by: []
+  description:
+    purpose: Render one selected retained candidate as the governed deterministic Model TXT schema.
+    data: Candidate identifier, sample rate, numeric type, detector parameters, FIR weights, bias, residual
+      center, and residual scale.
+    timing: async
+    immediate_rejections:
+    - code: model-evidence-unavailable
+      condition: The selected retained kernel or required model metadata is unavailable.
+    - code: model-export-busy
+      condition: One artifact export is already active.
+  symbols:
+  - LearningService
+- id: learning.model-file-output
+  owner: learning_qualification
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Atomically replace one user-selected Model TXT destination without exposing filesystem technology
+      to Learning.
+    data: Destination path and a deterministic stream of UTF-8 LF-delimited Model TXT lines.
+    timing: sync
+    immediate_rejections:
+    - code: model-write-failed
+      condition: The destination or same-folder temporary file cannot be written, flushed, or atomically
+        replaced.
+  symbols:
+  - ModelTextFilePort
+- id: profile.command
+  owner: profile_export
+  direction: input
+  kind: command
+  contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+  implemented_by: []
+  description:
+    purpose: Render and save an approved qualified profile.
+    data: Qualified semantic profile, language target, namespace, and destination.
+    timing: sync
+    immediate_rejections:
+    - code: profile-not-qualified
+      condition: No accepted qualified profile was selected.
+  symbols:
+  - ProfileCommandPort
+- id: profile.file-output
+  owner: profile_export
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Save generated header text to a user-selected path.
+    data: Destination path, UTF-8 header text, and overwrite choice.
+    timing: sync
+    immediate_rejections:
+    - code: write-denied
+      condition: Destination cannot be written or overwrite was not approved.
+  symbols:
+  - ProfileFilePort
+- id: profile.events
+  owner: profile_export
+  direction: output
+  kind: event
+  contract: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+  implemented_by: []
+  description:
+    purpose: Publish successful profile export metadata.
+    data: File path, language, numeric type, and qualified speed range.
+    timing: sync
+    immediate_rejections: []
+  symbols:
+  - ProfileEventPort
+- id: diagnostics.output
+  owner: process_diagnostics
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Persist bounded process-lifecycle, Learning-stage, and Qt/QML diagnostic evidence.
+    data: Immutable diagnostic status plus primitive stage, progress, Speed, Offset, failure, and runtime
+      metadata without dataset payloads.
+    timing: sync
+    immediate_rejections:
+    - code: diagnostics-unavailable
+      condition: The per-user diagnostic location cannot be written; application operation continues without
+        claiming persisted evidence.
+  symbols:
+  - DiagnosticsPort
+- id: replay.events
+  owner: studio_application
+  direction: output
+  kind: event
+  contract: src/dual_imu_collision_studio/adapters/desktop/controller.py
+  implemented_by: []
+  description:
+    purpose: Publish the terminal outcome of one accepted background Replay CSV or Model TXT export.
+    data: Artifact kind plus saved destination path on success or a bounded failure message on failure.
+    timing: async
+    immediate_rejections: []
+  symbols:
+  - StudioController
+- id: learning.execution
+  owner: learning_qualification
+  direction: output
+  kind: query
+  contract: src/dual_imu_collision_studio/domain/learning/contracts.py
+  implemented_by:
+  - history_worker_adapter
+  description:
+    purpose: Execute complete candidate-fold or recording jobs under one globally bounded queue.
+    data: Immutable dataset and fold jobs or independent complete recording jobs; ordered results and
+      resource evidence.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-batch
+      condition: Duplicate job identities or unsupported worker capacity.
+  symbols:
+  - LearningExecutionPort
+events:
+- id: workspace.changed
+  owner: data_workspace
+  output_port: workspace.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report a committed semantic workspace change.
+    emitted_when: Import, mapping, condition, cycle, or annotation validation has committed.
+    payload_fields:
+    - name: snapshot
+      type: WorkspaceSnapshot
+      meaning: Immutable workspace data for downstream use.
+    intended_consumers:
+    - studio_application
+- id: learning.progressed
+  owner: learning_qualification
+  output_port: learning.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report bounded progress without exposing mutable worker state.
+    emitted_when: A progress interval or learning stage boundary is reached.
+    payload_fields:
+    - name: progress
+      type: LearningProgress
+      meaning: Current stage, completed work, fallback scope, and optional typed Loss evidence.
+    intended_consumers:
+    - studio_application
+    - desktop_adapter
+- id: learning.completed
+  owner: learning_qualification
+  output_port: learning.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report deterministic qualification and ranking results.
+    emitted_when: Exact typed replay and fallback evaluation have completed.
+    payload_fields:
+    - name: result
+      type: QualificationResult
+      meaning: Ranked kernels and accepted speed coverage.
+    intended_consumers:
+    - studio_application
+    - desktop_adapter
+- id: learning.cancelled
+  owner: learning_qualification
+  output_port: learning.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report user cancellation together with the last committed complete-candidate result.
+    emitted_when: Accepted Learning work observes cancellation after atomically freezing its current partial
+      QualificationResult.
+    payload_fields:
+    - name: result
+      type: QualificationResult
+      meaning: Immutable candidates completed before cancellation, with either qualified Replay candidates
+        or the existing diagnostic fallback subset.
+    intended_consumers:
+    - studio_application
+    - desktop_adapter
+- id: profile.exported
+  owner: profile_export
+  output_port: profile.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report that the selected profile header was saved.
+    emitted_when: The file adapter confirms the complete write.
+    payload_fields:
+    - name: path
+      type: string
+      meaning: Saved header path.
+    intended_consumers:
+    - studio_application
+    - desktop_adapter
+- id: replay.exported
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report that one accepted Replay CSV export committed its destination.
+    emitted_when: The background writer has flushed the complete temporary file and atomically replaced
+      the destination.
+    payload_fields:
+    - name: path
+      type: string
+      meaning: Saved CSV destination path.
+    intended_consumers:
+    - desktop_adapter
+- id: replay.export-failed
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report that one accepted Replay CSV export failed without replacing its destination.
+    emitted_when: CSV rendering, temporary-file flushing, or atomic replacement raises a bounded failure.
+    payload_fields:
+    - name: reason
+      type: string
+      meaning: Bounded user-visible failure message.
+    intended_consumers:
+    - desktop_adapter
+- id: model.exported
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report that one accepted Model TXT export committed its destination.
+    emitted_when: The background writer has flushed the complete temporary file and atomically replaced
+      the destination.
+    payload_fields:
+    - name: path
+      type: string
+      meaning: Saved Model TXT destination path.
+    intended_consumers:
+    - desktop_adapter
+- id: model.export-failed
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  description:
+    purpose: Report that one accepted Model TXT export failed without replacing its destination.
+    emitted_when: Model rendering, temporary-file flushing, or atomic replacement raises a bounded failure.
+    payload_fields:
+    - name: reason
+      type: string
+      meaning: Bounded user-visible failure message.
+    intended_consumers:
+    - desktop_adapter
+types:
+- id: diagnostic-status
+  owner: process_diagnostics
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/process_diagnostics/model.py
+    symbol: DiagnosticStatus
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable diagnostic log path and previous-unclean-run summary exposed to application presentation.
+  lifetime: One application process.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - process_diagnostics
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields:
+  - name: log_path
+    type: string
+    role: metadata
+    meaning: Deterministic per-user rotating diagnostic log path.
+  - name: previous_unclean_summary
+    type: string
+    role: metadata
+    meaning: Bounded summary of the prior unclean process stage and progress.
+- id: diagnostics-port
+  owner: process_diagnostics
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+    symbol: DiagnosticsPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Application-owned protocol for bounded lifecycle, Learning, exception, and Qt/QML diagnostics.
+  lifetime: Application process.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - process_diagnostics
+  - studio_application
+  - desktop_adapter
+  references:
+  - diagnostic-status
+  - learning-timing-evidence
+  fields: []
+- id: learning-timing-evidence
+  owner: process_diagnostics
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/process_diagnostics/model.py
+    symbol: LearningTimingEvidence
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Privacy-bounded fallback-round, cumulative stage, total-run, per-History attempt, and process-tree
+    memory evidence.
+  lifetime: One diagnostics observation.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - process_diagnostics
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields: []
+- id: null-diagnostics
+  owner: process_diagnostics
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/process_diagnostics/contracts.py
+    symbol: NullDiagnostics
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Side-effect-free diagnostics port used when persistent diagnostics are not composed.
+  lifetime: Application process.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  references:
+  - diagnostics-port
+  - diagnostic-status
+  fields: []
+- id: workspace-snapshot
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: WorkspaceSnapshot
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable recordings, conditions, cycles, and annotations accepted for learning.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  references: []
+  fields:
+  - name: recordings
+    type: tuple
+    role: domain-value
+    meaning: Validated semantic recordings and annotation partitions.
+- id: header-proposal
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: HeaderProposal
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Provisional header/data-start rows and source columns inferred for explicit wizard confirmation.
+  lifetime: One Mapping Wizard session.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  - data_workspace
+  - tabular_adapter
+  references: []
+  fields: []
+- id: learning-request
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningRequest
+    kind: class
+  visibility: cross-module
+  semantic_kind: command
+  description: Immutable input required to fit and qualify a bounded candidate grid.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  - learning_qualification
+  references:
+  - learning-settings
+  fields:
+  - name: workspace
+    type: object
+    role: domain-value
+    meaning: Application-mapped arrays and event truth.
+  - name: numeric_type
+    type: str
+    role: policy
+    meaning: Exact float32 or float64 replay target.
+  - name: settings
+    type: LearningSettings
+    role: policy
+    meaning: Immutable Training mode, fixed-grid selections and applicable grouped-CV or optimized-search
+      controls captured at Start.
+- id: qualification-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: QualificationResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One retained winner per completed nested offset and speed fallback round plus the minimum-misjudgment
+    diagnostic subset.
+  lifetime: From completed learning until application exit.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  references:
+  - qualified-candidate
+  - learning-progress
+  fields:
+  - name: candidates
+    type: tuple
+    role: domain-value
+    meaning: Retained round winners in deterministic completion order.
+  - name: diagnostic_candidates
+    type: tuple
+    role: domain-value
+    meaning: Minimum-error retained round winners ordered by finite worst collision latency and stable
+      order, with all exact ties retained.
+  - name: unavailable_rounds
+    type: tuple
+    role: domain-value
+    meaning: Immutable LearningProgress snapshots identifying skipped round scopes and insufficient-evidence
+      reasons; no fabricated candidates.
+- id: learning-cancelled
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningCancelled
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Typed cancellation outcome carrying the last immutable result committed at a complete-candidate
+    boundary.
+  lifetime: One cancelled Learning call.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - studio_application
+  references:
+  - qualification-result
+  fields:
+  - name: result
+    type: QualificationResult
+    role: domain-value
+    meaning: Completed candidates and deterministic diagnostic subset available when cancellation was
+      observed.
+- id: profile-export-request
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/model.py
+    symbol: ProfileExportRequest
+    kind: class
+  visibility: cross-module
+  semantic_kind: command
+  description: Qualified semantic profile and requested header output options.
+  lifetime: One export operation.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  - profile_export
+  references: []
+  fields:
+  - name: profile
+    type: object
+    role: domain-value
+    meaning: Application-mapped qualified detector profile.
+  - name: language
+    type: str
+    role: policy
+    meaning: C99 or C++17 output target.
+- id: activity-kind
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ActivityKind
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Stable explicit and derived annotation labels.
+  lifetime: Process lifetime.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  - data_workspace
+  references: []
+  fields: []
+- id: annotation-interval
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotationInterval
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One half-open explicit or derived sample interval.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: &id001 []
+  consumers: &id002
+  - studio_application
+  - data_workspace
+  references: &id003
+  - activity-kind
+  fields: &id004
+  - name: kind
+    type: ActivityKind
+    role: domain-value
+    meaning: Explicit or derived activity class.
+  - name: start_index
+    type: int
+    role: domain-value
+    meaning: Inclusive start sample index.
+  - name: end_index
+    type: int
+    role: domain-value
+    meaning: Exclusive end sample index.
+  - name: reason
+    type: optional str
+    role: metadata
+    meaning: Required reason for an Ignore interval.
+  - name: provisional
+    type: bool
+    role: contract-control
+    meaning: Whether this interval is an unconfirmed template proposal.
+  - name: source_recording_id
+    type: optional str
+    role: metadata
+    meaning: Reference recording provenance for a proposal.
+  - name: source_cycle_index
+    type: optional int
+    role: metadata
+    meaning: Reference Cycle provenance for a proposal.
+  - name: interval_id
+    type: str
+    role: domain-identity
+    meaning: Stable session identity preserved while interval confirmation state changes.
+- id: annotation-template-event
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotationTemplateEvent
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One ordered Pick, Put, Fork Collision, or Ignore interval expressed as normalized Cycle
+    phases.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references:
+  - activity-kind
+  fields:
+  - name: kind
+    type: ActivityKind
+    role: domain-value
+    meaning: Explicit projected activity or exclusion class.
+  - name: start_phase
+    type: float
+    role: domain-value
+    meaning: Inclusive start position normalized to the reference Cycle.
+  - name: end_phase
+    type: float
+    role: domain-value
+    meaning: Exclusive end position normalized to the reference Cycle.
+  - name: reason
+    type: optional str
+    role: metadata
+    meaning: Required reason when kind is Ignore and absent otherwise.
+- id: annotation-template
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotationTemplate
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable label phases, reference duration and cadence, Robot Speed, and source provenance
+    atomically activated from one confirmed Cycle.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references:
+  - annotation-template-event
+  fields:
+  - name: robot_speed_mm_s
+    type: float
+    role: domain-value
+    meaning: Exact Robot Speed group that may consume the template.
+  - name: source_recording_id
+    type: str
+    role: domain-identity
+    meaning: Recording that owns the reference Cycle.
+  - name: source_cycle_index
+    type: int
+    role: domain-identity
+    meaning: Ordered reference Cycle index within its recording.
+  - name: reference_cycle_length_samples
+    type: int
+    role: domain-value
+    meaning: Confirmed source Cycle duration used for generated destination Cycles.
+  - name: cycle_period_samples
+    type: float
+    role: domain-value
+    meaning: Median confirmed source Cycle start-to-start cadence.
+  - name: events
+    type: tuple of AnnotationTemplateEvent
+    role: domain-value
+    meaning: Ordered normalized event and Ignore intervals.
+- id: test-condition
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: TestCondition
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Robot Speed and Collision Offset metadata for one recording.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: recording
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: Recording
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One mapped recording and its explicit annotation truth.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: column-mapping
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ColumnMapping
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Confirmed wizard mapping for one CSV or worksheet.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: imported-samples
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ImportedSamples
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Expanded semantic timestamps and six IMU axes with unchanged measured samples and immutable
+    inserted-sample indexes. Repair one through three missing samples by time-linear interpolation, require
+    equally divided periods within two percent of the inferred nominal period, and reject a recording
+    with four missing samples or misalignment.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers:
+  - studio_application
+  - data_workspace
+  - tabular_adapter
+  references: []
+  fields:
+  - name: time_s
+    type: array
+    role: domain-value
+    meaning: Expanded chronological timestamps retaining measured endpoints.
+  - name: internal_imu
+    type: array
+    role: domain-value
+    meaning: Measured and time-linearly interpolated Internal axes.
+  - name: external_imu
+    type: array
+    role: domain-value
+    meaning: Measured and time-linearly interpolated External axes.
+  - name: inferred_sample_rate_hz
+    type: float
+    role: domain-value
+    meaning: Nominal rate inferred before repair.
+  - name: discontinuity_before
+    type: array
+    role: metadata
+    meaning: Accepted repaired recordings contain no acquisition reset markers.
+  - name: warnings
+    type: tuple of str
+    role: metadata
+    meaning: Import diagnostics including repair counts.
+  - name: interpolated_indices
+    type: tuple of int
+    role: metadata
+    meaning: Ordered unique inserted row indexes distinct from measured samples.
+- id: waveform-viewport-projection
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: WaveformViewportProjection
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable pixel-bounded projection of one original three-axis waveform viewport, using
+    raw values or deterministic Min/Max and arithmetic-mean buckets shared across both IMUs.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers:
+  - studio_application
+  references: []
+  fields:
+  - name: mode
+    type: str
+    role: policy
+    meaning: Exact raw or envelope renderer mode selected from visible sample count and plot width.
+  - name: positions
+    type: tuple of float
+    role: domain-value
+    meaning: Viewport-local horizontal positions for raw samples or bucket centers.
+  - name: minimums
+    type: tuple of tuple of float
+    role: domain-value
+    meaning: Three channel minima; equal to raw values in raw mode.
+  - name: maximums
+    type: tuple of tuple of float
+    role: domain-value
+    meaning: Three channel maxima; equal to minimums in raw mode.
+  - name: means
+    type: tuple of tuple of float
+    role: domain-value
+    meaning: Three channel arithmetic means; equal to raw values in raw mode.
+  - name: sample_start
+    type: int
+    role: metadata
+    meaning: Inclusive original sample index covered by the projection.
+  - name: sample_end
+    type: int
+    role: metadata
+    meaning: Exclusive original sample index covered by the projection.
+- id: workspace-service
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/service.py
+    symbol: WorkspaceService
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Public workspace validation, same-speed annotation-template projection, and Normal Motion
+    derivation seam.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: workspace-command-port
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: WorkspaceCommandPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned workspace command protocol.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: tabular-input-port
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: TabularInputPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned tabular input protocol.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers:
+  - data_workspace
+  - tabular_adapter
+  references: *id003
+  fields: *id004
+- id: workspace-event-port
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: WorkspaceEventPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Workspace snapshot event protocol.
+  lifetime: One in-memory application session.
+  mutability: immutable
+  mutation_authority: *id001
+  consumers: *id002
+  references: *id003
+  fields: *id004
+- id: history-spec
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistorySpec
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Deduplicated tap count with ordered requested-history aliases.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: &id005 []
+  consumers: &id006
+  - studio_application
+  - learning_qualification
+  references: &id007
+  - single-imu-settings
+  fields: &id008 []
+- id: candidate-plan
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CandidatePlan
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable model-rule plan; threshold values and total detector candidate count remain unknown
+    until frozen-model scoring.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: history-job
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryJob
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable dataset, fallback state, target type, and one requested History assigned to one
+    worker.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: history-execution-error
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryExecutionError
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Base typed terminal failure for one History execution batch.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - studio_application
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: hardware-memory-insufficient-error
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HardwareMemoryInsufficientError
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Terminal insufficient-hardware-memory outcome that forbids retry and cancels all workers.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - studio_application
+  - learning_qualification
+  - history_worker_adapter
+  references:
+  - history-execution-error
+  fields: *id008
+- id: insufficient-training-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: InsufficientTrainingEvidence
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Typed evidence shortage raised only for absent fit samples, insufficient Cycle groups,
+    or unsupported FIR windows; never for numerical execution failures.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  references: *id007
+  fields: *id008
+- id: history-job-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryJobResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable ordered candidates, worker timing, and optional explicit unavailable reason returned
+    for one requested History. Reasons distinguish Training shortage, missing round search evidence, and
+    empty per-model threshold bounds; unclassified emptiness remains an execution failure.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: history-batch-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryBatchResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Ordered four-History results and aggregate launch-memory and Peak RSS evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: history-attempt-timing
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryAttemptTiming
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable requested History, one-based attempt, and elapsed seconds shown in Training evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - studio_application
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: history-worker-progress
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryWorkerProgress
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Bounded History, attempt, stage, fraction, and elapsed-time observation without process
+    handles.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - studio_application
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: fir-matrix-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FirMatrixEvidence
+    kind: class
+  visibility: private
+  semantic_kind: domain-value
+  description: Worker-local immutable FIR features, targets, and source row indexes reusable across model
+    rules.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  references: *id007
+  fields: *id008
+- id: history-fold-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: HistoryFoldEvidence
+    kind: class
+  visibility: private
+  semantic_kind: domain-value
+  description: Worker-local training and per-condition held-out FIR matrices for one grouped fold.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  references: *id007
+  fields: *id008
+- id: learning-log-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningLogEvidence
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Typed parameter-search, rounded round-final, admitted fold-kernel, fallback, or terminal
+    evidence for the session execution log.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  references:
+  - parameter-point
+  fields:
+  - name: kind
+    type: str
+    role: domain-value
+    meaning: Stable evidence category interpreted by the application presentation mapper.
+  - name: parameter
+    type: optional ParameterPoint
+    role: domain-value
+    meaning: Exact tap
+    Ridge alpha: null
+    and Robust K identity when applicable.: null
+  - name: parameter_loss
+    type: optional float
+    role: domain-value
+    meaning: Raw or half-up rounded parameter selection Loss according to the evidence kind.
+  - name: previous_parameter_loss
+    type: optional float
+    role: domain-value
+    meaning: Previous raw best Loss used to calculate relative improvement.
+  - name: fold_index
+    type: optional int
+    role: domain-identity
+    meaning: Admitted original fold identity when reporting Kernel Loss.
+  - name: kernel_loss
+    type: optional float
+    role: domain-value
+    meaning: Original fold Kernel Loss.
+  - name: validation_pass
+    type: optional bool
+    role: contract-control
+    meaning: Per-condition Validation allowance verdict for the fold.
+  - name: validation_outcomes
+    type: tuple
+    role: domain-value
+    meaning: Ordered Robot Speed
+    Collision Offset: null
+    and Validation-allowance verdict tuples without MSE payloads.: null
+  - name: evaluated_count
+    type: int
+    role: metadata
+    meaning: Completed effective parameter evaluations or admitted Qualification kernels according to
+      the evidence kind.
+  - name: pending_count
+    type: int
+    role: metadata
+    meaning: Remaining fold jobs or admitted Qualification kernels according to the evidence kind.
+  - name: disposition
+    type: str
+    role: contract-control
+    meaning: Fixed-grid CV-selected or CV-rejected outcome when every evaluated point is reported.
+  - name: reason
+    type: str
+    role: metadata
+    meaning: Stable explanation for the fixed-grid CV disposition.
+- id: learning-progress
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningProgress
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable stage, fallback-round, and bounded-work progress snapshot emitted during one
+    run, with an optional unavailable reason for proven insufficient Training evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references:
+  - learning-log-evidence
+  fields:
+  - name: log_evidence
+    type: optional LearningLogEvidence
+    role: metadata
+    meaning: Structured Loss or lifecycle evidence for the session-only execution log.
+  - name: evaluated_count
+    type: optional int
+    role: metadata
+    meaning: Completed parameter evaluations or admitted Qualification kernels for applicable progress
+      entries.
+  - name: pending_count
+    type: optional int
+    role: metadata
+    meaning: Remaining fold jobs or admitted Qualification kernels for applicable progress entries; total
+      work is completed plus remaining.
+- id: learning-interval
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningInterval
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Learning-owned sample-index evidence interval mapped from confirmed annotation truth.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: learning-recording
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningRecording
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Framework-free immutable arrays, condition metadata, and evidence spans for one recording.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: learning-dataset
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningDataset
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Complete application-mapped dataset accepted by one Learning run.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: fit-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FitEvidence
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Pooled Cycle-contained Normal Robot Motion, Robot Pick, and Robot Put arrays with excluded
+    gaps represented as distinct segment identities for one fallback state.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: cycle-fold-group
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CycleFoldGroup
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable recording, condition, and Cycle identity used as the minimum cross-validation
+    group.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: cross-validation-fold
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CrossValidationFold
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One deterministic held-out set of complete Cycle groups.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: cross-validation-plan
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CrossValidationPlan
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Three-to-five-fold grouped plan covering every active Cycle exactly once as held-out evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: cross-validated-model
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CrossValidatedModel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Selected model rules, grouped-fold losses, and final all-active-evidence FIR fit for one
+    history.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: detector-config
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: DetectorConfig
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Frozen target-type detector configuration.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: detector-trace
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: DetectorTrace
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Per-sample replay score, state, ratio, and trigger evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: replay-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ReplayEvidence
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Full-resolution synchronized target-numeric FIR prediction, residual, detector trace, trigger,
+    and selected event latency evidence for one retained candidate and recording.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references:
+  - detector-trace
+  - qualified-candidate
+  - learning-recording
+  fields: *id008
+- id: recording-qualification
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: RecordingQualification
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Exact per-recording activity evidence, false events, collision detections, worst latency,
+    chronological per-Collision Detector Score SNR, and status used by one retained candidate's condition
+    aggregation; absent Normal, Pick, or Put activity is neutral while Collision evidence is mandatory.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  references: []
+  fields:
+  - name: recording_id
+    type: str
+    role: domain-identity
+    meaning: Supplied recording identity.
+  - name: robot_speed_mm_s
+    type: float
+    role: domain-value
+    meaning: Recording Robot Speed.
+  - name: collision_offset_mm
+    type: float
+    role: domain-value
+    meaning: Recording Collision Offset.
+  - name: normal_false_events
+    type: int
+    role: domain-value
+    meaning: False triggers classified as Normal.
+  - name: pick_false_events
+    type: int
+    role: domain-value
+    meaning: False triggers classified as Pick.
+  - name: put_false_events
+    type: int
+    role: domain-value
+    meaning: False triggers classified as Put.
+  - name: collision_detected_count
+    type: int
+    role: domain-value
+    meaning: Collision intervals detected within the governed deadline.
+  - name: collision_interval_count
+    type: int
+    role: domain-value
+    meaning: Supplied Collision interval denominator.
+  - name: worst_collision_latency_ms
+    type: optional float
+    role: domain-value
+    meaning: Worst finite detected Collision latency.
+  - name: status
+    type: str
+    role: contract-control
+    meaning: PASS when present non-Collision activity has no false trigger and every mandatory Collision
+      is detected within 150 ms; FAIL for contradictory evidence; COVERAGE_GAP when no Collision interval
+      exists.
+  - name: collision_snrs_db
+    type: tuple of optional float
+    role: domain-value
+    meaning: Chronologically ordered per-Collision Detector Score SNR in dB; unavailable entries are None
+      and an empty tuple means no Collision interval.
+- id: qualified-candidate
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: QualifiedCandidate
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Frozen model and detector identity, grouped cross-validation provenance and losses, fallback-round
+    provenance, ranking margins, all-supplied misjudgment and collision-detection totals, per-offset evidence,
+    and observed qualified suffix for one retained round winner.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references:
+  - recording-qualification
+  fields:
+  - name: recording_qualifications
+    type: tuple of RecordingQualification
+    role: domain-value
+    meaning: Ordered exact per-recording Qualification results from the completed detector configuration.
+- id: condition-qualification
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ConditionQualification
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Exact activity denominators, false events, collision detections, latency, and status for
+    one supplied speed and offset tuple.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: offset-qualification
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: OffsetQualification
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable all-speed qualification evidence for one collision offset.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: fallback-state
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FallbackState
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable active offsets, excluded offsets, and current fitting speed interval.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: fallback-action
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FallbackAction
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Explicit stop, offset-exclusion, speed-reduction, or exhaustion decision.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: fallback-transition
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FallbackTransition
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Selected round winner and deterministic next fallback state.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: frozen-fir-model
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FrozenFirModel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Source-scale 3x3 MIMO FIR and residual normalization result.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: learning-service
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/service.py
+    symbol: LearningService
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Public learning, replay, fallback, and ranking seam.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: learning-command-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningCommandPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned learning command protocol.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: learning-event-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningEventPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Learning progress and completion event protocol.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers: *id006
+  references: *id007
+  fields: *id008
+- id: history-execution-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: HistoryExecutionPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned protocol for fixed-four History execution and typed lifecycle evidence.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references: *id007
+  fields: *id008
+- id: replay-csv-file-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: ReplayCsvFilePort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned protocol for one atomic full-resolution Replay CSV write.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - desktop_adapter
+  references: *id007
+  fields: *id008
+- id: model-text-file-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: ModelTextFilePort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned protocol for one atomic deterministic Model TXT write.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - desktop_adapter
+  references: *id007
+  fields: *id008
+- id: training-mode
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: TrainingMode
+    kind: enum
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Stable fixed-grid or optimized linear Training dispatch identity.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: []
+  values:
+  - fixed_grid
+  - optimized
+- id: learning-settings
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: LearningSettings
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Captured Training mode, fixed-grid selections, common grouped-CV controls, and optimized-only
+    Robust and convergence controls.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - training-mode
+  fields:
+  - name: n_fold
+    type: int
+    role: configuration
+    meaning: Complete-Cycle grouped fold count from two through ten.
+  - name: include_training_mse
+    type: bool
+    role: policy
+    meaning: Whether Parameter and Kernel Loss equally combine Training and Validation MSE.
+  - name: use_robust_refit
+    type: bool
+    role: policy
+    meaning: Optimized-only Robust refit switch; fixed-grid execution always disables it.
+  - name: convergence_tolerance_percent
+    type: float
+    role: configuration
+    meaning: Optimized-only fine-search relative improvement tolerance.
+  - name: validation_allowance_percent
+    type: float
+    role: configuration
+    meaning: Shared per-condition Validation MSE allowance before fold selection.
+  - name: training_mode
+    type: TrainingMode
+    role: policy
+    meaning: Fixed-grid or optimized candidate-source selection.
+  - name: fixed_history_ms
+    type: tuple of int
+    role: configuration
+    meaning: Ordered checked subset of the six fixed-grid History values.
+  - name: fixed_ridge_alphas
+    type: tuple of float
+    role: configuration
+    meaning: Ordered checked subset of the five fixed-grid Ridge alpha values.
+- id: parameter-point
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ParameterPoint
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Exact effective alpha, taps and enabled integer K identity.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: *id008
+- id: condition-loss
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ConditionLoss
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Separate raw Training and Validation XYZ MSE for one active condition.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: *id008
+- id: fold-job
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FoldJob
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One parameter configuration by one fold, with centrally assigned complete Cycles.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - parameter-point
+  - learning-settings
+  - cycle-fold-group
+  fields: *id008
+- id: fold-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FoldResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One original fold kernel, condition errors or explicit numerical invalidity.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - parameter-point
+  - condition-loss
+  - frozen-fir-model
+  fields: *id008
+- id: parameter-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ParameterResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Complete N-fold results and their max-condition mean selection Loss.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - parameter-point
+  - fold-result
+  fields: *id008
+- id: kernel-training-evidence
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: KernelTrainingEvidence
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Original fold identity, captured settings, per-condition errors and parameter/kernel Loss.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - learning-settings
+  - condition-loss
+  - cross-validation-plan
+  fields: *id008
+- id: round-provenance
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: RoundProvenance
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Actual seed and Cycle fold map for one active fallback scope.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - cross-validation-plan
+  fields: *id008
+- id: run-provenance
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: RunProvenance
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Captured settings, fresh run seed and actual per-round evidence maps.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - learning-settings
+  - round-provenance
+  fields: *id008
+- id: fold-memory-estimate
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/memory.py
+    symbol: FoldMemoryEstimate
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Immutable fold-specific allocation counts, phase components and estimated peak.
+  lifetime: One admission decision.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references: []
+  fields: []
+- id: evidence-row-counts
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/memory.py
+    symbol: EvidenceRowCounts
+    kind: class
+  visibility: private
+  semantic_kind: domain-value
+  description: Selected, feature-valid and common-history row counts without feature allocation.
+  lifetime: One evidence count.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  references: []
+  fields: []
+- id: execution-batch
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: ExecutionBatch
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Ordered immutable job outcomes, process resource measurements and bounded admission diagnostics.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - fold-result
+  fields: *id008
+- id: recording-job
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: RecordingJob
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: One complete recording score or detector replay job without time slicing.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - learning-recording
+  - frozen-fir-model
+  - detector-config
+  fields: *id008
+- id: recording-result
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: RecordingResult
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Complete-recording scores or qualification metrics returned to coordinator.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: *id008
+- id: candidate-numerical-error
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CandidateNumericalError
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Narrow expected invalid candidate; never source, worker or memory failure.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: *id008
+- id: cycle-allocation-error
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: CycleAllocationError
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Terminal Cycle count/allocation preflight failure; no scientific fallback.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: *id008
+- id: learning-execution-port
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/contracts.py
+    symbol: LearningExecutionPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned bounded candidate-fold and complete-recording batch execution.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: *id005
+  consumers:
+  - learning_qualification
+  - history_worker_adapter
+  references:
+  - fold-job
+  - recording-job
+  - execution-batch
+  fields: *id008
+- id: condition-coverage
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/model.py
+    symbol: ConditionCoverage
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Exact supplied tuple denominators stored in the selected Profile.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: &id009 []
+  consumers: &id010
+  - studio_application
+  - profile_export
+  references: &id011 []
+  fields: &id012 []
+- id: semantic-profile
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/model.py
+    symbol: SemanticProfile
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Complete immutable qualified Profile, including grouped Training provenance, shared by
+    desktop result views and both header generators.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers: *id010
+  references: *id011
+  fields: *id012
+- id: profile-header-artifact
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/model.py
+    symbol: ProfileHeaderArtifact
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Deterministic default filename, semantic hash, and rendered header text for one kernel.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers: *id010
+  references: *id011
+  fields: *id012
+- id: profile-export-service
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/service.py
+    symbol: ProfileExportService
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Public deterministic C99 and C++17 rendering seam.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers: *id010
+  references: *id011
+  fields: *id012
+- id: profile-command-port
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileCommandPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned profile render protocol.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers: *id010
+  references: *id011
+  fields: *id012
+- id: profile-file-port
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileFilePort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned approved file output protocol.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers:
+  - profile_export
+  - desktop_adapter
+  references: *id011
+  fields: *id012
+- id: profile-event-port
+  owner: profile_export
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/profile_export/contracts.py
+    symbol: ProfileEventPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Successful export event protocol.
+  lifetime: Selected Profile lifetime.
+  mutability: immutable
+  mutation_authority: *id009
+  consumers: *id010
+  references: *id011
+  fields: *id012
+- id: project-source-reference
+  owner: project_session
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/project_session/model.py
+    symbol: ProjectSourceReference
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: External recording path, worksheet, byte size, and SHA-256 identity persisted in .dicsproj.
+  lifetime: Active project and save/open transaction.
+  mutability: immutable
+  mutation_authority: &id013 []
+  consumers: &id014
+  - studio_application
+  - project_session
+  - desktop_adapter
+  references: &id016 []
+  fields: &id015 []
+- id: project-document
+  owner: project_session
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/project_session/model.py
+    symbol: ProjectDocument
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Complete immutable project schema root with recordings, templates, UI selection, and optional
+    completed Profile results.
+  lifetime: Active project and save/open transaction.
+  mutability: immutable
+  mutation_authority: *id013
+  consumers: *id014
+  references:
+  - project-source-reference
+  fields: *id015
+- id: project-session-service
+  owner: project_session
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/project_session/service.py
+    symbol: ProjectSessionService
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Public semantic validation and source-integrity seam for project save/open.
+  lifetime: Active project and save/open transaction.
+  mutability: immutable
+  mutation_authority: *id013
+  consumers: *id014
+  references: *id016
+  fields: *id015
+- id: project-file-port
+  owner: project_session
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/project_session/contracts.py
+    symbol: ProjectFilePort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: Demand-owned strict project JSON and source-hash persistence protocol.
+  lifetime: Active project and save/open transaction.
+  mutability: immutable
+  mutation_authority: *id013
+  consumers:
+  - project_session
+  - project_file_adapter
+  references: *id016
+  fields: *id015
+- id: project-source-missing
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _ProjectSourceMissing
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: Transaction-local signal identifying the next unavailable recording source during project
+    restoration.
+  lifetime: Active project and save/open transaction.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references: *id016
+  fields: *id015
+- id: tabular-reader
+  owner: tabular_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/tabular/reader.py
+    symbol: TabularReader
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: CSV and XLSX implementation of the tabular input port.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - tabular_adapter
+  consumers:
+  - studio_application
+  - tabular_adapter
+  references:
+  - tabular-input-port
+  fields: &id017 []
+- id: process-diagnostics
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/diagnostics.py
+    symbol: ProcessDiagnostics
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Thread-serialized rotating log, clean-shutdown marker, faulthandler sink, and Qt/Python
+    exception-handler implementation of the application diagnostics port.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - studio_application
+  - desktop_adapter
+  references:
+  - diagnostics-port
+  - diagnostic-status
+  fields: *id017
+- id: waveform-item
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
+    symbol: WaveformItem
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Qt Quick Scene Graph waveform texture item with viewport-aware channel rendering and channel,
+    viewport, and geometry-change invalidation.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields: *id017
+- id: padded-button
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/PaddedButton.qml
+    symbol: PaddedButton
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Shared Qt Quick button whose dimensions are governed by centralized design tokens.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - desktop_adapter
+  references: []
+  fields: *id017
+- id: atomic-profile-writer
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/profile_writer.py
+    symbol: AtomicProfileWriter
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Atomic per-artifact implementation of the approved profile file output port.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - studio_application
+  - desktop_adapter
+  references:
+  - profile-file-port
+  - profile-header-artifact
+  fields: *id017
+- id: atomic-replay-csv-writer
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicReplayCsvWriter
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Atomic streaming implementation of the Learning-owned Replay CSV file output port.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - studio_application
+  - desktop_adapter
+  references:
+  - replay-csv-file-port
+  - replay-evidence
+  fields: *id017
+- id: atomic-model-text-writer
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicModelTextWriter
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Atomic streaming implementation of the Learning-owned Model TXT file output port.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - studio_application
+  - desktop_adapter
+  references:
+  - model-text-file-port
+  - qualified-candidate
+  fields: *id017
+- id: atomic-project-store
+  owner: project_file_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/project_store.py
+    symbol: AtomicProjectStore
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Strict duplicate-rejecting JSON parser, deterministic atomic writer, and SHA-256 source
+    identity adapter.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - project_file_adapter
+  consumers:
+  - studio_application
+  - project_file_adapter
+  references:
+  - project-file-port
+  fields: *id017
+- id: spawn-history-executor
+  owner: history_worker_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/parallel/history_workers.py
+    symbol: SpawnHistoryExecutor
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Windows spawn implementation of the fixed-four History execution port with typed retry,
+    cancellation, and process-tree RSS policy.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - history_worker_adapter
+  consumers:
+  - studio_application
+  - history_worker_adapter
+  references:
+  - history-execution-port
+  - history-job
+  - history-job-result
+  - history-batch-result
+  - history-worker-progress
+  fields: *id017
+- id: worker-attempt
+  owner: history_worker_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/parallel/history_workers.py
+    symbol: _WorkerAttempt
+    kind: class
+  visibility: private
+  semantic_kind: adapter-binding
+  description: Adapter-private mutable process, IPC connection, attempt number, and start clock for one
+    History attempt.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - history_worker_adapter
+  consumers:
+  - history_worker_adapter
+  references: []
+  fields: *id017
+- id: studio-controller
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: StudioController
+    kind: class
+  visibility: module-public
+  semantic_kind: composition-mapping
+  description: Application-owned QML facade and sibling-domain mapper, including direct session reset
+    and Open project replacement, collision-free post-open manual annotation identity allocation, synchronized
+    reference-selection state, the bounded session-only Training log, restored frozen-Profile replay reconstruction,
+    discrete active/excluded speed provenance, and semantically distinct per-recording Replay result projection.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - single-imu-settings
+  - filter-stage-spec
+  - filter-design
+  - frozen-self-imu-model
+  fields: *id017
+- id: learning-worker-signals
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _LearningWorkerSignals
+    kind: class
+  visibility: module-public
+  semantic_kind: composition-mapping
+  description: Private queued Qt signal bridge for immutable Learning progress, completion, and cancelled
+    partial-result handoff.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - learning-progress
+  - qualification-result
+  fields: *id017
+- id: learning-worker
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: LearningWorker
+    kind: class
+  visibility: module-public
+  semantic_kind: composition-mapping
+  description: One Qt thread worker that invokes the framework-free Learning command and emits immutable
+    progress, completion, or cancelled partial-result values.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - learning-request
+  - learning-progress
+  - qualification-result
+  - learning-cancelled
+  fields: *id017
+- id: replay-csv-export-signals
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _ReplayCsvExportSignals
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: Private queued Qt completion and failure signal bridge for one Replay CSV export.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references: []
+  fields: *id017
+- id: replay-csv-export-worker
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _ReplayCsvExportWorker
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: Private QRunnable that computes one immutable ReplayEvidence from a snapshotted selection,
+    streams it as CSV, and invokes atomic output away from the UI thread.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - replay-evidence
+  - replay-csv-file-port
+  fields: *id017
+- id: model-text-export-signals
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _ModelTextExportSignals
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: Private queued Qt completion and failure signal bridge for one Model TXT export.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references: []
+  fields: *id017
+- id: model-text-export-worker
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _ModelTextExportWorker
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: Private QRunnable that renders one snapshotted candidate as deterministic Model TXT and
+    invokes atomic output away from the UI thread.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - qualified-candidate
+  - model-text-file-port
+  fields: *id017
+- id: spawn-learning-executor
+  owner: history_worker_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/parallel/learning_workers.py
+    symbol: SpawnLearningExecutor
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Bounded Windows spawn batch execution with eight fold jobs or four whole-recording jobs,
+    zero retries.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - history_worker_adapter
+  consumers:
+  - studio_application
+  - history_worker_adapter
+  references:
+  - learning-execution-port
+  - fold-job
+  - recording-job
+  - execution-batch
+  fields: []
+- id: frozen-mlp-model
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/model.py
+    symbol: FrozenMlpModel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Frozen arbitrary-depth ReLU MLP layer arrays and residual normalization, in selected numeric
+    precision.
+  lifetime: One learning run.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - studio_application
+  - learning_qualification
+  references: []
+  fields: []
+- id: filter-stage-spec
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/preprocessing.py
+    symbol: FilterStageSpec
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Learning-owned immutable filter edges and attenuation ratios; SPEC-0036 adds explicit lowpass
+    with one passband and stopband edge using the existing Butterworth design and stored coefficient contract.
+  lifetime: Captured configuration/model or owner service lifetime.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references: []
+  fields: []
+- id: filter-design
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/preprocessing.py
+    symbol: FilterDesign
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Single-IMU FilterDesign owned by Learning; SPEC-0030 defines behavior and persistence.
+  lifetime: Captured configuration/model or owner service lifetime.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - filter-stage-spec
+  fields: []
+- id: single-imu-settings
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/preprocessing.py
+    symbol: SingleImuSettings
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Single-IMU SingleImuSettings owned by Learning; SPEC-0030 defines behavior and persistence.
+  lifetime: Captured configuration/model or owner service lifetime.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - filter-design
+  fields: []
+- id: frozen-self-imu-model
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/self_imu.py
+    symbol: FrozenSelfImuModel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: Single-IMU FrozenSelfImuModel owned by Learning; SPEC-0030 defines behavior and persistence.
+  lifetime: Captured configuration/model or owner service lifetime.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - frozen-fir-model
+  - single-imu-settings
+  fields: []
+- id: self-imu-learning-service
+  owner: learning_qualification
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/learning/self_imu.py
+    symbol: SelfImuLearningService
+    kind: class
+  visibility: module-public
+  semantic_kind: domain-value
+  description: Single-IMU SelfImuLearningService owned by Learning; SPEC-0030 defines behavior and persistence.
+  lifetime: Captured configuration/model or owner service lifetime.
+  mutability: owner-mutable
+  mutation_authority:
+  - learning_qualification
+  consumers:
+  - learning_qualification
+  - studio_application
+  - history_worker_adapter
+  references:
+  - learning-service
+  fields: []
+- id: sensor-mapping
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/SensorMapping.qml
+    symbol: SensorMapping
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: Per-IMU raw/filtered column mapping and adopted filter design view; no algorithm choice.
+  lifetime: Application session.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - desktop_adapter
+  references: []
+  fields: []
+type_exclusions: []
+state_objects:
+- id: recordings-viewport-before-wizard
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: recordingsViewportY
+    storage: file-static
+  type: real
+  visibility: private
+  lifetime: One ImportPage QML instance within the main window.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: mapping-wizard-validation-error
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/MappingWizard.qml
+    symbol: validationError
+    storage: file-static
+  type: string
+  visibility: private
+  lifetime: One Mapping Wizard QML instance within the main window.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: recent-adopted-filter-parameters
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/MappingWizard.qml
+    symbol: recentFilterParameters
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One window-owned Wizard instance; retained across recordings and dialog closes, not persisted.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: single-imu-filter-template-index
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/SingleImuFilters.qml
+    symbol: templateIndex
+    storage: file-static
+  type: int
+  visibility: private
+  lifetime: One per-IMU editor; reset to last stage on load, adjusted on move/delete, never persisted.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: single-imu-filterpreview
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/SensorMapping.qml
+    symbol: filterPreview
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One per-sensor mapping component; invalidated by source, time or filter edits.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: single-imu-adoptedfilter
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/SensorMapping.qml
+    symbol: adoptedFilter
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One per-sensor mapping component; invalidated by source, time or filter edits.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+boundary_mappings:
+- id: waveform-projection-to-desktop
+  interaction: Map one immutable width-bounded raw or Min/Max plus arithmetic-mean waveform viewport projection
+    into StudioController-owned primitive Qt values for downstream desktop rendering without exposing
+    original arrays.
+  producer: data_workspace
+  consumer: studio_application
+  parent: studio_application
+  producer_contract: waveform-viewport-projection
+  consumer_contract: studio-controller
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->data_workspace
+  forbidden_edges:
+  - data_workspace->studio_application
+- id: workspace-to-project
+  interaction: Map recording mappings, test conditions, annotations, templates, confirmation, inserted-sample
+    provenance, and source references into project-owned values without waveform arrays; restore identical
+    repaired timeline and markers on reopen.
+  producer: data_workspace
+  consumer: project_session
+  parent: studio_application
+  producer_contract: workspace-snapshot
+  consumer_contract: project-document
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->data_workspace
+  - studio_application->project_session
+  forbidden_edges:
+  - data_workspace->project_session
+  - project_session->data_workspace
+- id: profile-to-project
+  interaction: Map optional completed immutable Profiles and Qualification coverage into version-bound
+    project-owned values.
+  producer: profile_export
+  consumer: project_session
+  parent: studio_application
+  producer_contract: semantic-profile
+  consumer_contract: project-document
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->profile_export
+  - studio_application->project_session
+  forbidden_edges:
+  - profile_export->project_session
+  - project_session->profile_export
+- id: project-to-workspace
+  interaction: Transactionally map a validated project recording set back into workspace-owned mappings
+    and annotations after every source is re-read and fingerprint-verified, preserve all stored interval
+    identities, and restore the application-owned next manual annotation identity above every persisted
+    manual annotation-N suffix.
+  producer: project_session
+  consumer: data_workspace
+  parent: studio_application
+  producer_contract: project-document
+  consumer_contract: workspace-snapshot
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->project_session
+  - studio_application->data_workspace
+  forbidden_edges:
+  - project_session->data_workspace
+  - data_workspace->project_session
+- id: project-to-profile
+  interaction: Map compatible completed project Profile values back into profile_export-owned immutable
+    semantic Profiles.
+  producer: project_session
+  consumer: profile_export
+  parent: studio_application
+  producer_contract: project-document
+  consumer_contract: semantic-profile
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->project_session
+  - studio_application->profile_export
+  forbidden_edges:
+  - project_session->profile_export
+  - profile_export->project_session
+- id: workspace-to-learning
+  interaction: Convert a committed workspace snapshot into learning-owned recording, interval, condition,
+    discontinuity, and array values inside an immutable request; derived Normal intervals already subtract
+    the timestamp-based Collision onset-through-150-ms response windows used by Qualification.
+  producer: data_workspace
+  consumer: learning_qualification
+  parent: studio_application
+  producer_contract: workspace-snapshot
+  consumer_contract: learning-request
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->data_workspace
+  - studio_application->learning_qualification
+  forbidden_edges:
+  - data_workspace->learning_qualification
+  - learning_qualification->data_workspace
+- id: learning-settings-to-project
+  interaction: Map editable next-run Learning settings and immutable captured run provenance to or from
+    project-owned semantic values, applying explicit fixed-grid empty defaults only when legacy fields
+    are absent.
+  producer: learning_qualification
+  consumer: project_session
+  parent: studio_application
+  producer_contract: learning-settings
+  consumer_contract: project-document
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->learning_qualification
+  - studio_application->project_session
+  forbidden_edges:
+  - learning_qualification->project_session
+  - project_session->learning_qualification
+- id: qualification-to-export
+  interaction: Convert every user-selected retained round winner into an independent semantic profile
+    export command.
+  producer: learning_qualification
+  consumer: profile_export
+  parent: studio_application
+  producer_contract: qualification-result
+  consumer_contract: profile-export-request
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->learning_qualification
+  - studio_application->profile_export
+  forbidden_edges:
+  - learning_qualification->profile_export
+  - profile_export->learning_qualification
+flows:
+- id: manage-project
+  owner: studio_application
+  description: Save or transactionally reopen one strict external-reference project without mutating active
+    state on failure.
+  trigger:
+    kind: command
+    ref: project.command
+    description: The user chooses Open Project, Save Project, or Save Project As.
+  steps:
+  - id: manage-project.step-1
+    order: 1
+    module: studio_application
+    action: Map sibling-owned stable values to or from project_session, verify every source identity before
+      commit, restore collision-free session-local manual annotation identity allocation without rewriting
+      persisted identities, and invoke project.file-storage for strict JSON I/O.
+    receives:
+    - project.command
+    - project.file-storage
+    emits: []
+    state_changes: []
+    side_effects:
+    - Read referenced recording files and one project file, or atomically replace one project file.
+  success:
+    result: The saved artifact is deterministic, or the complete validated project replaces the active
+      session, exposes the restored stage, and safely allocates later manual annotation identities.
+    events: []
+  errors: []
+- id: record-process-diagnostics
+  owner: studio_application
+  description: Persist bounded process and Learning execution evidence without changing analytical behavior.
+  trigger:
+    kind: command
+    ref: diagnostics.output
+    description: The process starts or exits, Learning changes stage/progress, an exception is observed,
+      or Qt emits a warning.
+  steps:
+  - id: record-process-diagnostics.step-1
+    order: 1
+    module: studio_application
+    action: Map the observation to primitive privacy-bounded fields and invoke the diagnostics output
+      port.
+    receives:
+    - diagnostics.output
+    emits: []
+    state_changes: []
+    side_effects:
+    - Atomically update the clean-shutdown marker and append a bounded rotated diagnostic record through
+      desktop_adapter.
+  success:
+    result: The latest bounded process or Learning state can be inspected after an unclean exit.
+    events: []
+  errors: []
+- id: prepare-workspace
+  owner: data_workspace
+  description: Import recordings and produce a validated annotated workspace.
+  trigger:
+    kind: command
+    ref: workspace.command
+    description: The user advances the import or annotation workflow.
+  steps:
+  - id: prepare-workspace.step-1
+    order: 1
+    module: data_workspace
+    action: Map QML drag coordinates to sample-index intervals, preserve session-local undo history, atomically
+      confirm and activate a selected reference Cycle, generate provisional Cycles from one destination
+      Anchor and the reference cadence, project provisional events and Ignore reasons only into equal-speed
+      recordings, then validate mapping, samples, test conditions, cycles, Ignore reasons, and interval
+      partition rules before committing truth. For annotation display, project the shared original-sample
+      viewport through ALG-0008 into raw points or deterministic width-bounded Min/Max and arithmetic-mean
+      buckets before L0 maps primitives to the desktop renderer.
+    receives:
+    - workspace.command
+    - workspace.tabular-input
+    emits:
+    - workspace.changed
+    state_changes: []
+    side_effects: []
+  - id: prepare-workspace.step-2
+    order: 2
+    module: studio_application
+    action: After successful reference activation, clear both application-owned annotation selection representations
+      before publishing refreshed UI state.
+    receives:
+    - workspace.changed
+    emits: []
+    state_changes: []
+    side_effects: []
+  success:
+    result: A complete immutable workspace snapshot is available.
+    events:
+    - workspace.changed
+  errors: []
+- id: learn-and-qualify
+  owner: learning_qualification
+  description: Fit candidate kernels and qualify exact target replay across all supplied offsets and speeds
+    using nested fallback rounds.
+  trigger:
+    kind: command
+    ref: learning.command
+    description: The user selects compatible algorithm/source pairs in Training; L0 admits every selected
+      recording before dispatching serial immutable requests on the existing analysis worker.
+  steps:
+  - id: learn-and-qualify.step-1
+    order: 1
+    module: learning_qualification
+    action: Capture settings and run seed, preflight complete-Cycle counts, and allocate a fresh reproducible
+      round fold map. Check common 128-ms evaluation and threshold evidence. In fixed-grid mode dispatch
+      only the deduplicated checked History by alpha Cartesian product with Robust K zero and publish
+      every evaluated disposition; in optimized mode dispatch the unchanged coarse and joint fine frontiers.
+      Require all N results before shared aggregation and publish typed Loss evidence plus the rounded
+      round-final Loss.
+    receives:
+    - learning.command
+    - learning.history-execution
+    emits:
+    - learning.progressed
+    state_changes: []
+    side_effects: []
+  - id: learn-and-qualify.step-2
+    order: 2
+    module: history_worker_adapter
+    action: Reuse up to eight spawn processes for candidate-fold fitting and up to four for whole-recording
+      Score or detector replay. No nested pools, retries, time slicing, adaptive worker reduction or worker-local
+      model selection. Return immutable job-identified results and aggregate Peak RSS evidence; memory,
+      cancellation or unexpected failure terminates the batch.
+    receives:
+    - learning.history-execution
+    emits: []
+    state_changes: []
+    side_effects:
+    - Spawn, monitor, retry, join, or terminate child processes.
+  - id: learn-and-qualify.step-3
+    order: 3
+    module: learning_qualification
+    action: Aggregate equal-fold condition losses, retain every parameter within the configured relative
+      tolerance of the minimum raw Parameter Loss, apply Validation allowance, and retain every fold whose
+      raw maximum-condition Kernel Loss exactly equals that parameter's raw minimum while excluding rounded
+      and second-place near ties. Publish the current parameter and fold plus completed, remaining, and
+      derived total Qualification work. Qualify every admitted original kernel without refit before ranking,
+      using the maximum Normal interval maximum as N, the minimum of the per-Collision window maxima as
+      C for candidate generation, the strict Score-greater-than-Threshold predicate, mandatory all-Collision
+      detection within the inclusive 150-ms minus-Ignore deadline, and neutral absence of Normal, Pick,
+      or Put classes. Derive chronological per-Collision Detector Score SNR from each existing whole-recording
+      Score trace without changing detector decisions. Commit every fully qualified selected kernel immediately
+      with its ordered per-recording metrics and provenance. On normal completion publish the fallback
+      result; on cancellation publish only the committed qualified candidates or, when none qualifies,
+      the existing minimum-total-error diagnostic subset while keeping the terminal state Cancelled. See
+      ALG-0007, ALG-0006, ALG-0005, ALG-0004 and ALG-0003.
+    receives:
+    - learning.history-execution
+    emits:
+    - learning.progressed
+    - learning.completed
+    - learning.cancelled
+    state_changes: []
+    side_effects: []
+  success:
+    result: Retained round winners expose covered offsets, valid speed ranges, minimum-misjudgment diagnostic
+      status, and full-resolution selectable Replay evidence; only qualified winners remain exportable.
+    events:
+    - learning.completed
+  errors:
+  - condition: The user cancels accepted Learning work.
+    event: learning.cancelled
+    handling: Discard incomplete candidate work, freeze the last complete-candidate result, expose qualified
+      candidates or the diagnostic fallback in Replay, and retain the Cancelled terminal state.
+- id: export-profile
+  owner: profile_export
+  description: Generate one independent header artifact for every selected qualified kernel.
+  trigger:
+    kind: command
+    ref: profile.command
+    description: The user exports any checked qualified kernels to one folder.
+  steps:
+  - id: export-profile.step-1
+    order: 1
+    module: profile_export
+    action: Validate each qualified profile, render deterministic header artifacts, and request independent
+      atomic file writes.
+    receives:
+    - profile.command
+    emits:
+    - profile.exported
+    state_changes: []
+    side_effects:
+    - Write selected header files through profile.file-output, replacing only files explicitly approved
+      by the user.
+  success:
+    result: Separate C99 or C++17 profile headers are saved for all non-skipped kernels.
+    events:
+    - profile.exported
+  errors: []
+- id: export-replay-csv
+  owner: studio_application
+  description: Export one selected kernel and recording as a full-resolution diagnostic CSV without rendering
+    Replay waveform charts.
+  trigger:
+    kind: command
+    ref: learning.replay-export
+    description: The user chooses a CSV destination after selecting a retained kernel and recording in
+      Replay.
+  steps:
+  - id: export-replay-csv.step-1
+    order: 1
+    module: studio_application
+    action: Resolve and snapshot the selected complete recording, candidate, and destination, reject unavailable
+      or concurrent work, and dispatch one background export.
+    receives:
+    - learning.replay-export
+    emits:
+    - replay.exported
+    - replay.export-failed
+    state_changes: []
+    side_effects:
+    - Schedule one QRunnable on the Qt thread pool.
+  - id: export-replay-csv.step-2
+    order: 2
+    module: learning_qualification
+    action: Stream the exact ordered diagnostic columns and every aligned sample without changing Replay
+      numeric or detector semantics.
+    receives:
+    - learning.replay-export
+    emits: []
+    state_changes: []
+    side_effects: []
+  - id: export-replay-csv.step-3
+    order: 3
+    module: desktop_adapter
+    action: Write UTF-8 CSV rows to a same-folder temporary file, flush them, and atomically replace the
+      selected destination.
+    receives:
+    - learning.replay-file-output
+    emits: []
+    state_changes: []
+    side_effects:
+    - Atomically replace one user-selected CSV file.
+  success:
+    result: One complete CSV for the selected kernel and recording is saved and the UI reports its path.
+    events:
+    - replay.exported
+  errors:
+  - condition: Replay evidence is unavailable or another export is active.
+    event: replay.export-failed
+    handling: Preserve the current session and show the rejection in the status bar.
+  - condition: Rendering or atomic file output fails.
+    event: replay.export-failed
+    handling: Preserve any previous destination and report the bounded failure message on the UI thread.
+- id: export-model-txt
+  owner: studio_application
+  description: Export one selected retained kernel as a deterministic standalone Model TXT artifact.
+  trigger:
+    kind: command
+    ref: learning.model-export
+    description: The user chooses a TXT destination after selecting a retained kernel in Replay.
+  steps:
+  - id: export-model-txt.step-1
+    order: 1
+    module: studio_application
+    action: Resolve and snapshot the selected candidate, sample rate, numeric type, and destination, reject
+      unavailable or concurrent work, and dispatch one background export.
+    receives:
+    - learning.model-export
+    emits:
+    - model.exported
+    - model.export-failed
+    state_changes: []
+    side_effects:
+    - Schedule one QRunnable on the Qt thread pool.
+  - id: export-model-txt.step-2
+    order: 2
+    module: learning_qualification
+    action: Stream deterministic scalar metadata and named FIR weights, bias, residual center, and residual
+      scale sections without changing numeric values.
+    receives:
+    - learning.model-export
+    emits: []
+    state_changes: []
+    side_effects: []
+  - id: export-model-txt.step-3
+    order: 3
+    module: desktop_adapter
+    action: Write UTF-8 LF-delimited lines to a same-folder temporary file, flush them, and atomically
+      replace the selected destination.
+    receives:
+    - learning.model-file-output
+    emits: []
+    state_changes: []
+    side_effects:
+    - Atomically replace one user-selected TXT file.
+  success:
+    result: One complete Model TXT for the selected kernel is saved and the UI reports its path.
+    events:
+    - model.exported
+  errors:
+  - condition: Model evidence is unavailable or another artifact export is active.
+    event: model.export-failed
+    handling: Preserve the current session and show the rejection in the status bar.
+  - condition: Rendering or atomic file output fails.
+    event: model.export-failed
+    handling: Preserve any previous destination and report the bounded failure message on the UI thread.
+adr_exceptions: []
+c_analyzer:
+  ast:
+    status: not-applicable
+    rationale: Product implementation is Python and QML; generated C/C++ headers are verified development
+      artifacts, not governed translation units.
+  functional_boundary:
+    status: not-applicable
+    rationale: There are no maintained C/C++ adapter source files.
+    forbidden_includes: []
+    forbidden_symbols: []
+  forbidden_public_includes: []
+  forbidden_public_symbols: []
+  forbidden_source_symbols: []
+python_analyzer:
+  status: required
+  rationale: The maintained product implementation is Python and requires complete AST evidence.
+workloads:
+- id: project-io
+  flow: manage-project
+  steps:
+  - manage-project.step-1
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: One bounded metadata/result JSON document plus sequential SHA-256 reads of referenced CSV/XLSX
+      source files.
+  budgets: []
+- id: process-diagnostics
+  flow: record-process-diagnostics
+  steps:
+  - record-process-diagnostics.step-1
+  timing_class: best-effort
+  activation:
+    kind: lifecycle
+  data:
+    volume: One bounded metadata-only record per lifecycle, stage, progress, failure, or Qt/QML warning
+      observation.
+  budgets: []
+- id: interactive-workspace
+  flow: prepare-workspace
+  steps:
+  - prepare-workspace.step-1
+  - prepare-workspace.step-2
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: Up to 50 recordings and 10 million total rows
+    with viewport-bounded rendering.: null
+  budgets:
+  - metric: interaction_latency_p95
+    operator: <=
+    threshold: 100
+    unit: ms
+    method: Windows application benchmark
+- id: analysis-run
+  flow: learn-and-qualify
+  steps:
+  - learn-and-qualify.step-1
+  - learn-and-qualify.step-2
+  - learn-and-qualify.step-3
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: A bounded user-selected fixed grid or optimized coarse/fine candidate search over the validated
+      annotated workspace, with one target-type score value per supplied sample cached for the active
+      frozen model, ordered per-recording result metadata, and at most 10,000 session log entries.
+  budgets:
+  - metric: progress_interval
+    operator: <=
+    threshold: 500
+    unit: ms
+    method: worker integration test
+  - metric: cancellation_observation
+    operator: <=
+    threshold: 2
+    unit: s
+    method: worker integration test
+  - metric: fallback_round_elapsed
+    operator: <=
+    threshold: 1800
+    unit: s
+    method: supplied-dataset Windows process benchmark excluding a one-time retry
+  - metric: system_memory_pressure_stop_fraction
+    operator: <=
+    threshold: 0.9
+    unit: ratio
+    method: Refresh total and available physical RAM at existing resource-check points; stop when (total
+      - available) / total exceeds this threshold. This is sampled protection, not a hard allocation cap;
+      process-tree RSS remains diagnostic.
+- id: profile-write
+  flow: export-profile
+  steps:
+  - export-profile.step-1
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: One generated header file.
+  budgets: []
+- id: replay-csv-write
+  flow: export-replay-csv
+  steps:
+  - export-replay-csv.step-1
+  - export-replay-csv.step-2
+  - export-replay-csv.step-3
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: One selected recording with up to the governed session row limit and twenty-two deterministic
+      CSV columns.
+  budgets: []
+- id: model-txt-write
+  flow: export-model-txt
+  steps:
+  - export-model-txt.step-1
+  - export-model-txt.step-2
+  - export-model-txt.step-3
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: One selected candidate with scalar metadata, nine times tap_count FIR coefficients, and three
+      three-axis vector sections.
+  budgets: []
+execution_profiles:
+- id: windows-desktop
+  status: proposed
+  assurance_scope:
+  - functional-compatibility
+  - performance
+  target:
+    platform: Windows 10 or Windows 11 x64
+    cpu: Four or more logical CPU cores
+    runtime: Python 3.11+ with PySide6 Qt Quick
+    compiler: Python interpreter; generated headers target external C99 or C++17 compilers
+    cache_topology: {}
+    scheduler_capabilities:
+    - Operating-system preemptive threads
+    - Qt queued signals
+    - Windows multiprocessing spawn processes
+execution_units:
+- id: qt-ui-thread
+  profile: windows-desktop
+  kind: event-loop
+  priority: operating-system-default
+  affinity: []
+  concurrency: 1
+  resources:
+    memory: Viewport data and immutable presentation snapshots only.
+  blocking: Bounded local UI and file-dialog operations only.
+  allocation: Python and Qt runtime managed.
+- id: analysis-worker
+  profile: windows-desktop
+  kind: worker-pool
+  priority: operating-system-default
+  affinity: []
+  concurrency: 1
+  resources:
+    memory: Coordinator state and Qualification score cache; active Learning reserves 10 percent of total
+      physical RAM and stops when sampled system occupancy exceeds 90 percent. Process-tree RSS is diagnostic
+      only.
+  blocking: Bounded local dataset reads and cooperative cancellation points.
+  allocation: Python runtime managed with chunk-bounded temporary arrays.
+- id: history-process-workers
+  profile: windows-desktop
+  kind: worker-pool
+  priority: operating-system-default
+  affinity: []
+  concurrency: 4
+  resources:
+    memory: Four Windows spawn processes, each owning one dataset copy and one requested-History/fold
+      FIR matrix cache; aggregate parent-plus-child Peak RSS is capped at 85 percent of launch-time available
+      RAM.
+  blocking: CPU-bound NumPy/Python Training with cooperative cancellation and bounded IPC polling.
+  allocation: Python and NumPy runtime managed; worker-local FIR caches are released at process exit.
+- id: replay-export-worker
+  profile: windows-desktop
+  kind: worker-pool
+  priority: operating-system-default
+  affinity: []
+  concurrency: 1
+  resources:
+    memory: One worker-computed immutable ReplayEvidence or one bounded Model TXT line stream plus bounded
+      formatting buffers; no full duplicate artifact string.
+  blocking: CPU-bound artifact rendering followed by sequential same-folder temporary-file write, flush,
+    and atomic replacement.
+  allocation: Python and Qt thread-pool runtime managed.
+- id: fold-process-workers
+  profile: windows-desktop
+  kind: worker-pool
+  priority: operating-system-default
+  affinity: []
+  concurrency: 8
+  resources:
+    memory: At most eight dataset copies and job-local training arrays. MLP estimated additional batch
+      bytes must fit current available RAM minus 10 percent of total RAM. Active fold execution stops
+      above sampled 90 percent system occupancy.
+  blocking: CPU-bound fold fitting with bounded IPC polling and terminal cancellation.
+  allocation: Python/NumPy managed; no shared mutable model arrays.
+- id: qualification-process-workers
+  profile: windows-desktop
+  kind: worker-pool
+  priority: operating-system-default
+  affinity: []
+  concurrency: 4
+  resources:
+    memory: At most four complete recording jobs; scores reused per frozen model. Active execution stops
+      above sampled 90 percent system occupancy.
+  blocking: CPU-bound complete recording replay with bounded IPC polling.
+  allocation: Worker-local arrays released after the batch.
+execution_mappings:
+- id: project-ui-map
+  profile: windows-desktop
+  workload: project-io
+  steps:
+  - manage-project.step-1
+  units:
+  - qt-ui-thread
+  serialization: One modal user-approved save/open transaction; active session commit occurs only after
+    complete validation.
+  reentrant: false
+  activation: project command
+  wcet: Not established; source hashing is bounded by the declared session source files.
+- id: diagnostics-ui-map
+  profile: windows-desktop
+  workload: process-diagnostics
+  steps:
+  - record-process-diagnostics.step-1
+  units:
+  - qt-ui-thread
+  serialization: The diagnostics adapter serializes writes from the UI and any Qt callback thread; no
+    mutable diagnostic state escapes.
+  reentrant: false
+  activation: process lifecycle or diagnostic observation
+  wcet: Not established; records are bounded and rotated.
+- id: workspace-ui-map
+  profile: windows-desktop
+  workload: interactive-workspace
+  steps:
+  - prepare-workspace.step-1
+  - prepare-workspace.step-2
+  units:
+  - qt-ui-thread
+  serialization: Qt event loop serializes committed UI state changes.
+  reentrant: false
+  activation: user command
+  wcet: Not established; p95 is measured by application benchmarks.
+- id: analysis-worker-map
+  profile: windows-desktop
+  workload: analysis-run
+  steps:
+  - learn-and-qualify.step-1
+  units:
+  - analysis-worker
+  - fold-process-workers
+  - qualification-process-workers
+  serialization: One active run with one bounded job queue; full-N parameter barriers and all fine paths
+    complete before selection. Progress reaches Qt by queued signal. Search and Qualification worker batches
+    never overlap.
+  reentrant: false
+  activation: Start Learning command
+  wcet: Not established; bounded parameter domain but data-dependent convergence and ties. No wall-clock
+    timeout; cancellation is cooperative at coordinator/job boundaries.
+- id: profile-ui-map
+  profile: windows-desktop
+  workload: profile-write
+  steps:
+  - export-profile.step-1
+  units:
+  - qt-ui-thread
+  serialization: One user-approved save operation.
+  reentrant: false
+  activation: export command
+  wcet: Not established for local filesystem output.
+- id: replay-csv-map
+  profile: windows-desktop
+  workload: replay-csv-write
+  steps:
+  - export-replay-csv.step-1
+  - export-replay-csv.step-2
+  - export-replay-csv.step-3
+  units:
+  - qt-ui-thread
+  - replay-export-worker
+  serialization: The UI snapshots one selected complete recording, candidate, and destination, permits
+    one active artifact export, and receives one queued terminal completion or failure signal.
+  reentrant: false
+  activation: Replay CSV export command
+  wcet: Data-dependent and bounded by the selected recording row count and local filesystem behavior.
+- id: model-txt-map
+  profile: windows-desktop
+  workload: model-txt-write
+  steps:
+  - export-model-txt.step-1
+  - export-model-txt.step-2
+  - export-model-txt.step-3
+  units:
+  - qt-ui-thread
+  - replay-export-worker
+  serialization: The UI snapshots one selected candidate, sample rate, numeric type, and destination,
+    shares the one-active-artifact exclusion with Replay CSV, and receives one queued terminal completion
+    or failure signal.
+  reentrant: false
+  activation: Model TXT export command
+  wcet: Data-dependent and bounded by tap_count and local filesystem behavior.
+execution_channels:
+- id: history-worker-ipc
+  profile: windows-desktop
+  from_unit: analysis-worker
+  to_unit: history-process-workers
+  contract_refs:
+  - learning.history-execution
+  capacity: 4
+  ordering: FIFO per History attempt; final merge uses declared History order
+  copy_policy: Windows spawn pickle copy of immutable domain values
+  timeout_ms: 100
+  overload: reject
+- id: worker-ui-progress
+  profile: windows-desktop
+  from_unit: analysis-worker
+  to_unit: qt-ui-thread
+  contract_refs:
+  - learning.progressed
+  - learning.completed
+  - learning.cancelled
+  capacity: 2
+  ordering: FIFO per event type
+  copy_policy: immutable snapshot copy
+  timeout_ms: 0
+  overload: coalesce
+- id: replay-export-command
+  profile: windows-desktop
+  from_unit: qt-ui-thread
+  to_unit: replay-export-worker
+  contract_refs:
+  - learning.replay-export
+  - learning.replay-file-output
+  capacity: 1
+  ordering: One selected input snapshot per accepted export command
+  copy_policy: Immutable selection inputs and NumPy arrays are shared read-only within the process; only
+    bounded row text is copied to file buffers.
+  timeout_ms: 0
+  overload: reject
+- id: model-export-command
+  profile: windows-desktop
+  from_unit: qt-ui-thread
+  to_unit: replay-export-worker
+  contract_refs:
+  - learning.model-export
+  - learning.model-file-output
+  capacity: 1
+  ordering: One selected candidate snapshot per accepted export command
+  copy_policy: Immutable candidate parameters are shared read-only within the process; only bounded line
+    text is copied to file buffers.
+  timeout_ms: 0
+  overload: reject
+data_access_profiles:
+- id: waveform-viewport-buckets
+  profile: windows-desktop
+  workload: interactive-workspace
+  tier: tier-1
+  element_size_bytes: 8
+  layout: Contiguous row-major NumPy float64 view over three axes with bounded position, minimum, maximum,
+    and arithmetic-mean output vectors.
+  active_working_set_bytes: 24109280
+  stride_bytes: 24
+  reuse: Each viewport projection traverses the selected visible slice once; Internal and External projections
+    reuse identical integer bucket boundaries.
+  alignment_bytes: 8
+  sharing: Original arrays are read-only by contract; only bounded immutable projection values cross into
+    Qt/QML.
+  cache_target: Windows desktop CPU memory hierarchy and installed NumPy implementation.
+  candidates:
+  - Uniformly sample one point per display column.
+  - Reduce every contiguous display bucket to its minimum, maximum, and arithmetic mean.
+- id: history-fir-matrices
+  profile: windows-desktop
+  workload: analysis-run
+  tier: tier-1
+  element_size_bytes: 8
+  layout: Row-major NumPy float64 fitting matrices private to one candidate-fold worker, with target-dtype
+    evaluation arithmetic.
+  active_working_set_bytes: 1
+  stride_bytes: 8
+  reuse: Effective parameter results are cached per round; dataset inputs are copied once per batch worker.
+    Qualification score arrays are computed once per frozen fold model and recording and reused across
+    configurations.
+  alignment_bytes: 8
+  sharing: No writable sharing between workers; immutable job inputs are copied by Windows spawn.
+  cache_target: Worker process memory hierarchy and NumPy BLAS implementation.
+  candidates:
+  - Rebuild FIR rows for every rule.
+  - Cache complete FIR matrices per History and fold role.
+microarchitecture_profiles:
+- id: waveform-projection-python-numpy
+  profile: windows-desktop
+  workload: interactive-workspace
+  tier: tier-1
+  branches: One deterministic raw-versus-envelope branch plus viewport and input validation.
+  simd_eligibility: Min/Max and arithmetic-mean reductions are delegated to the installed NumPy backend;
+    no application SIMD claim is made.
+  compiler: CPython 3.11+ and installed NumPy binary.
+  compiler_flags: Not controlled by the application.
+  vectorization_report: Not available for packaged NumPy; the Windows p95 benchmark is authoritative.
+  pgo: Not controlled by the application.
+  lto: Not controlled by the application.
+- id: history-training-python-numpy
+  profile: windows-desktop
+  workload: analysis-run
+  tier: tier-1
+  branches: FIR segment validation and robust-refit selection remain deterministic Python/NumPy branches.
+  simd_eligibility: Dense matrix products and linear solves are delegated to the installed NumPy backend;
+    Python row construction is not claimed SIMD-vectorized.
+  compiler: CPython 3.11+ and installed NumPy binary.
+  compiler_flags: Not controlled by the application.
+  vectorization_report: Not available for packaged NumPy; runtime benchmark is authoritative.
+  pgo: Not controlled by the application.
+  lto: Not controlled by the application.
+platform_variants:
+- id: windows-desktop-minimum
+  profile: windows-desktop
+  units:
+  - qt-ui-thread
+  - analysis-worker
+  - fold-process-workers
+  - qualification-process-workers
+  - replay-export-worker
+  data_access_profiles:
+  - waveform-viewport-buckets
+  - history-fir-matrices
+  microarchitecture_profiles:
+  - waveform-projection-python-numpy
+  - history-training-python-numpy
+  parameters:
+    minimum_logical_cores: 4
+    minimum_ram_gb: 8
+    maximum_search_workers: 8
+    maximum_qualification_workers: 4
+    maximum_ram_fraction: 0.9
+  release: false
+realtime_scheduling_studies: []
+validation_profiles:
+- id: windows-application-validation
+  applicability: required
+  rationale: SPEC-0001 makes Windows runtime, responsiveness, memory, cancellation, and generated-header
+    compatibility claims.
+  target_claims:
+  - Windows 10 and 11 startup
+  - Clean and unclean process shutdown diagnostics
+  - Last bounded Learning stage, progress, Speed, and Offset evidence after an unclean exit
+  - Qt/QML warning capture without analytical payload persistence
+  - UI responsiveness
+  - worker progress and cancellation
+  - memory preflight
+  - up to eight candidate-fold workers and four complete-recording workers with no retries
+  - terminal MemoryError cancellation and insufficient-hardware message
+  - Training, Qualification and total durations with immutable run settings and Cycle-fold provenance
+  - Fixed-grid or optimized captured Training mode, exact fixed selections, legacy default behavior and
+    independent next-run versus completed-run project provenance
+  - Session-only structured Loss log capped at 10,000 entries with deterministic overflow accounting and
+    smart-follow presentation
+  - Selected retained kernel exposes one exact ordered Qualification result row per supplied recording
+    with row-bound Replay CSV export
+  - Selected retained kernel exposes discrete active and excluded supplied speeds separately from Training
+    and Qualified ranges, and preserves PASS, FAIL, and COVERAGE_GAP result meaning with an explicit reason
+  - Cancelled Learning retains only fully qualified completed candidates, or the existing minimum-total-error
+    diagnostic subset when none qualifies, and exposes the result through Candidate Dashboard and Analytical
+    Replay without changing the Cancelled terminal state
+  - Mapping Wizard completion preserves the Recordings ListView pixel viewport with legal-range clamping
+  - Mapping Wizard Next and Finish reject invalid current-step or final inputs without losing selections
+    and show every recoverable configuration, mapping, source-data, or file-read error inline
+  - Reopened projects preserve stored annotation identities, allocate collision-free later manual annotation
+    identities, and keep Replace Reference available for a newly selected valid Cycle
+  - Successful reference activation clears stale visible and primary annotation selection state consistently
+  - Active Learning admits estimated MLP batch bytes within available RAM minus 10 percent of total physical
+    RAM and terminates above sampled 90 percent system occupancy; aggregate process-tree Peak RSS remains
+    diagnostic evidence
+  - C99 and C++17 header compilation
+  evidence_plan: tests and bounded Windows application smoke/performance evidence recorded before release

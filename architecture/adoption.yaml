@@ -1,0 +1,15 @@
+schema_version: 2.2.0
+project_stage: new
+applicable_analyzers:
+- python
+runtime_validation:
+  applicability: required
+  rationale: The desktop release has explicit Windows runtime and performance acceptance
+    claims.
+tool_host_evidence:
+  operating_systems:
+  - windows
+  python_versions:
+  - '3.11'
+  - '3.12'
+  - '3.13'
