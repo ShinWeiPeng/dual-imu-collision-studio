@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import QtCore
 import CollisionStudio 1.0
 import "."
 
@@ -19,6 +20,92 @@ ApplicationWindow {
     property string pendingProjectTransition: ""
     property url pendingProjectUrl
     property bool allowProjectClose: false
+    property var jsonExportQueue: []
+    property var jsonExportCurrent: ({})
+    property url jsonExportTarget
+    property string jsonExportError: ""
+
+    function nextJsonExport() {
+        if (!jsonExportQueue.length) return
+        let rows = jsonExportQueue.slice()
+        jsonExportCurrent = rows.shift()
+        jsonExportQueue = rows
+        jsonExportError = ""
+        jsonModelName.text = jsonExportCurrent.modelName
+        jsonNameDialog.open()
+    }
+    function saveJsonExport(replace) {
+        let result = studio.exportJsonModel(jsonExportCurrent.kernelId,
+            jsonExportCurrent.modelName, jsonExportTarget, replace)
+        if (result === "exists") jsonReplaceDialog.open()
+        else if (result === "saved") nextJsonExport()
+        else {
+            jsonExportError = studio.statusMessage
+            jsonNameDialog.open()
+        }
+    }
+
+    Dialog {
+        id: jsonNameDialog
+        objectName: "jsonModelNameDialog"
+        title: "Export JSON model — " + (window.jsonExportCurrent.kernelId || "")
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(540, window.width - 40)
+        standardButtons: Dialog.NoButton
+        onRejected: window.jsonExportQueue = []
+        ColumnLayout {
+            anchors.fill: parent
+            Label { text: "Model display name"; font.bold: true }
+            TextField { id: jsonModelName; objectName: "jsonModelName"; Layout.fillWidth: true; selectByMouse: true }
+            Label { text: (window.jsonExportCurrent.sampleRate || "") + " Hz · " + (window.jsonExportCurrent.numericType || "") + " · Internal/External XYZ in g"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: "Choose the JSON filename in the next dialog. Changing it will not change the model display name."; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            Label { text: window.jsonExportError; visible: text.length > 0; color: DesignTokens.warning; Layout.fillWidth: true; wrapMode: Text.Wrap }
+            RowLayout {
+                Item { Layout.fillWidth: true }
+                PaddedButton { text: "Cancel"; onClicked: jsonNameDialog.reject() }
+                PaddedButton {
+                    text: "Choose file…"; highlighted: true
+                    onClicked: {
+                        let error = studio.validateJsonModelName(window.jsonExportCurrent.kernelId, jsonModelName.text)
+                        if (error.length) { window.jsonExportError = error; return }
+                        let row = Object.assign({}, window.jsonExportCurrent)
+                        let fallback = row.modelName
+                        row.modelName = jsonModelName.text
+                        window.jsonExportCurrent = row
+                        let filename = /[<>:"/\\|?*]/.test(row.modelName) ? fallback : row.modelName
+                        jsonSaveDialog.selectedFile = jsonSaveDialog.currentFolder.toString().replace(/\/$/, "") + "/" + encodeURIComponent(filename) + ".json"
+                        jsonNameDialog.close()
+                        jsonSaveDialog.open()
+                    }
+                }
+            }
+        }
+    }
+    FileDialog {
+        id: jsonSaveDialog
+        objectName: "jsonModelSaveDialog"
+        title: "Save JSON model"
+        fileMode: FileDialog.SaveFile
+        options: FileDialog.DontConfirmOverwrite
+        currentFolder: StandardPaths.standardLocations(StandardPaths.DocumentsLocation)[0]
+        nameFilters: ["JSON model (*.json)"]
+        defaultSuffix: "json"
+        onAccepted: { window.jsonExportTarget = selectedFile; window.saveJsonExport(false) }
+        onRejected: window.jsonExportQueue = []
+    }
+    Dialog {
+        id: jsonReplaceDialog
+        objectName: "jsonModelReplaceDialog"
+        title: "Replace existing JSON file?"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(540, window.width - 40)
+        standardButtons: Dialog.Yes | Dialog.No
+        Label { anchors.fill: parent; text: window.jsonExportTarget.toString(); wrapMode: Text.WrapAnywhere }
+        onAccepted: window.saveJsonExport(true)
+        onRejected: window.jsonExportQueue = []
+    }
 
     function finishProjectTransition() {
         let action = pendingProjectTransition
@@ -1477,49 +1564,76 @@ ApplicationWindow {
     }
 
     component ExportPage: Item {
-        ColumnLayout { anchors.fill: parent; anchors.margins: 20; spacing: 14
-            RowLayout { Layout.fillWidth: true
-                SectionTitle { heading: "Export Profile"; supporting: "Export each selected qualified kernel as its own immutable Profile header. Header format does not rerun Qualification."; Layout.fillWidth: true }
-                PaddedButton { text: "Export Selected…"; highlighted: true; enabled: studio.canExportSelected; onClicked: exportFolderDialog.open() }
+        objectName: "jsonExportPage"
+        ColumnLayout {
+            anchors.fill: parent; anchors.margins: 20; spacing: 14
+            RowLayout {
+                Layout.fillWidth: true
+                SectionTitle {
+                    heading: "Export Profile"
+                    supporting: "Choose a qualified kernel to export as JSON. Each file contains one model and its frozen execution settings."
+                    Layout.fillWidth: true
+                }
+                Tag { label: studio.jsonExportKernels.length + " qualified"; tagColor: "#E4F4EE" }
             }
-            RowLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 12
-                Card { Layout.preferredWidth: 330; Layout.fillHeight: true
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 15; spacing: 12
-                        Label { text: "Header Format"; font.bold: true; font.pixelSize: 16 }
-                        ButtonGroup { id: formatGroup }
-                        RadioButton { text: "C++17"; checked: studio.headerFormat === "C++17"; ButtonGroup.group: formatGroup; onClicked: studio.setHeaderFormat("C++17") }
-                        RadioButton { text: "C99-compatible"; checked: studio.headerFormat === "C99-compatible"; ButtonGroup.group: formatGroup; onClicked: studio.setHeaderFormat("C99-compatible") }
-                        Rectangle { Layout.fillWidth: true; height: 1; color: DesignTokens.border }
-                        Label { text: "Selected Kernels"; font.bold: true }
-                        Label { text: studio.selectedKernelCount + " selected"; color: studio.selectedKernelCount ? DesignTokens.primary : DesignTokens.warning }
-                        ListView { Layout.fillWidth: true; Layout.preferredHeight: 110; clip: true; spacing: 4; model: studio.resultKernels
-                            delegate: Rectangle { required property var modelData; required property int index; width: ListView.view.width; height: modelData.selected ? 36 : 0; visible: modelData.selected; radius: 5; color: DesignTokens.surfaceMuted
-                                RowLayout { anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
-                                    Label { text: modelData.kernelId; font.bold: true }
-                                    Label { text: modelData.qualifiedRange; color: DesignTokens.textMuted; Layout.fillWidth: true }
-                                    PaddedButton { text: "Preview"; flat: true; onClicked: studio.previewKernel(index) }
+            Card {
+                Layout.fillWidth: true; Layout.fillHeight: true
+                ColumnLayout {
+                    anchors.fill: parent; anchors.margins: 16; spacing: 0
+                    RowLayout {
+                        Layout.fillWidth: true; Layout.preferredHeight: 42; spacing: 16
+                        Label { text: "Kernel ID"; font.bold: true; Layout.preferredWidth: 110 }
+                        Label { text: "History / taps"; font.bold: true; Layout.preferredWidth: 180 }
+                        Label { text: "Threshold"; font.bold: true; Layout.preferredWidth: 130 }
+                        Label { text: "Qualified range (mm/s)"; font.bold: true; Layout.fillWidth: true }
+                        Item { Layout.preferredWidth: 140 }
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: DesignTokens.border }
+                    ListView {
+                        id: jsonKernelList
+                        objectName: "jsonExportKernelList"
+                        Layout.fillWidth: true; Layout.fillHeight: true
+                        clip: true; spacing: 2
+                        model: studio.jsonExportKernels
+                        ScrollBar.vertical: ScrollBar { }
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: ListView.view.width
+                            height: Math.max(64, exportRow.implicitHeight + 24)
+                            color: index % 2 ? DesignTokens.surfaceMuted : "transparent"
+                            radius: 5
+                            RowLayout {
+                                id: exportRow
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter; spacing: 16
+                                Label { text: modelData.kernelId; font.bold: true; Layout.preferredWidth: 110; elide: Text.ElideRight }
+                                Label { text: modelData.kernelDepth; Layout.preferredWidth: 180; wrapMode: Text.Wrap }
+                                Label { text: modelData.threshold; Layout.preferredWidth: 130; elide: Text.ElideRight }
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 4
+                                    Label { text: modelData.qualifiedRange; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                    Label { text: modelData.exportReason; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap; color: DesignTokens.warning; font.pixelSize: 11 }
+                                }
+                                PaddedButton {
+                                    objectName: "exportJson_" + modelData.kernelId
+                                    text: "Export JSON…"; highlighted: true
+                                    Layout.preferredWidth: 140
+                                    enabled: modelData.exportable
+                                    onClicked: {
+                                        window.jsonExportQueue = studio.prepareJsonExport(modelData.kernelId)
+                                        window.nextJsonExport()
+                                    }
                                 }
                             }
                         }
-                        Rectangle { Layout.fillWidth: true; height: 1; color: DesignTokens.border }
-                        Label { text: "Output"; font.bold: true }
-                        Label { text: "dual_imu_collision_profile_kNNN.h"; color: DesignTokens.primary; font.family: "Consolas"; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                        Label { text: "Target Numeric Type"; color: DesignTokens.textMuted }
-                        Label { text: studio.numericType || "Unavailable"; font.bold: true }
-                        Label { text: "Each file contains one Profile struct and one complete immutable instance. No runtime speed switch or session annotations."; color: DesignTokens.textMuted; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                        Item { Layout.fillHeight: true }
-                        Tag { label: studio.singleImuMode ? "Single IMU: simulation only" : studio.selectedKernelParameters.modelFamily === "MLP" ? "MLP export deferred" : studio.headerPreview.length ? "Ready to save" : "Qualification required"; tagColor: studio.headerPreview.length ? "#E4F4EE" : "#F5E5CF" }
-                    }
-                }
-                Card { Layout.fillWidth: true; Layout.fillHeight: true
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 12
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label { text: "Header Preview"; font.bold: true; font.pixelSize: 15 }
-                            Item { Layout.fillWidth: true }
-                            Tag { label: studio.headerFormat }
+                        ColumnLayout {
+                            anchors.centerIn: parent; width: Math.min(440, parent.width)
+                            visible: jsonKernelList.count === 0; spacing: 12
+                            Label { text: "No qualified kernels"; font.bold: true; font.pixelSize: 18; Layout.alignment: Qt.AlignHCenter }
+                            Label { text: "Complete Qualification to see kernels available for JSON export."; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: DesignTokens.textMuted }
+                            PaddedButton { text: "Replay & Qualify"; Layout.alignment: Qt.AlignHCenter; onClicked: studio.selectStage(3) }
                         }
-                        TextArea { Layout.fillWidth: true; Layout.fillHeight: true; readOnly: true; text: studio.singleImuMode ? "Single-IMU export is unavailable in this version. Save the project and use desktop Replay." : studio.selectedKernelParameters.modelFamily === "MLP" ? "MLP standalone deployment export is unavailable in this phase. Save the project to preserve model parameters and use Replay for desktop comparison." : studio.headerPreview || "Complete Learning and Qualification to preview the selected Profile."; font.family: "Consolas"; font.pixelSize: 11; color: DesignTokens.text; wrapMode: TextEdit.NoWrap; background: Rectangle { color: "#F8FAFC"; border.color: DesignTokens.border; radius: 6 } }
                     }
                 }
             }

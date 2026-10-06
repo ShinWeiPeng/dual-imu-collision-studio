@@ -59,7 +59,7 @@ flowchart TD
 
 ### `profile_export`
 
-- **Purpose:** Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact.
+- **Purpose:** Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
 - **Children:** None
 - **Related Flows:** [`export-profile`](generated/profile_export.md#export-profile)
 - **Protection Rationale:** Every artifact contains one Profile struct, exact target numeric constants, and a machine-readable strict Score-greater-than-Threshold detector contract.; Default file names are stable dual_imu_collision_profile_kNNN.h names.; Every Profile records kernel depth, worst latency, three robustness margins, covered and excluded offsets, qualified speed interval, and exact condition tuples.
@@ -78,7 +78,7 @@ flowchart TD
 - [`process_diagnostics`](generated/process_diagnostics.md) — Define privacy-bounded process and Learning diagnostic records independently of persistence technology.
 - [`data_workspace`](generated/data_workspace.md) — Own imported recordings, mappings, test conditions, cycles, annotations, and derived Normal regions.
 - [`learning_qualification`](generated/learning_qualification.md) — Fit independently selected FIR and custom-depth MLP candidates, retain original fold kernels and replay exact frozen predictions across supplied conditions.
-- [`profile_export`](generated/profile_export.md) — Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact.
+- [`profile_export`](generated/profile_export.md) — Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
 - [`project_session`](generated/project_session.md) — Own the versioned semantic project document, source-integrity rules, and transactional reopen/save contract.
 
 ## End-to-End Flows
@@ -87,7 +87,7 @@ flowchart TD
 - [`record-process-diagnostics`](generated/studio_application.md#record-process-diagnostics) — Persist bounded process and Learning execution evidence without changing analytical behavior.
 - [`prepare-workspace`](generated/data_workspace.md#prepare-workspace) — Import recordings and produce a validated annotated workspace.
 - [`learn-and-qualify`](generated/learning_qualification.md#learn-and-qualify) — Fit candidate kernels and qualify exact target replay across all supplied offsets and speeds using nested fallback rounds.
-- [`export-profile`](generated/profile_export.md#export-profile) — Generate one independent header artifact for every selected qualified kernel.
+- [`export-profile`](generated/profile_export.md#export-profile) — List all qualified frozen kernels with history, threshold and coverage for independent JSON export by kernel ID, with explicit name and file selection; retain header rendering for existing callers.
 - [`export-replay-csv`](generated/studio_application.md#export-replay-csv) — Export one selected kernel and recording as a full-resolution diagnostic CSV without rendering Replay waveform charts.
 - [`export-model-txt`](generated/studio_application.md#export-model-txt) — Export one selected retained kernel as a deterministic standalone Model TXT artifact.
 
@@ -251,6 +251,10 @@ flowchart TD
 
 ## State Ownership
 
+- `json-export-queue` / `desktop_adapter` / `owner-mutable` / `private`
+- `json-export-current` / `desktop_adapter` / `owner-mutable` / `private`
+- `json-export-target` / `desktop_adapter` / `owner-mutable` / `private`
+- `json-export-error` / `desktop_adapter` / `owner-mutable` / `private`
 - `recordings-viewport-before-wizard` / `desktop_adapter` / `owner-mutable` / `private`
 - `mapping-wizard-validation-error` / `desktop_adapter` / `owner-mutable` / `private`
 - `recent-adopted-filter-parameters` / `desktop_adapter` / `owner-mutable` / `private`

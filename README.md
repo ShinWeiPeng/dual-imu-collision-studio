@@ -110,6 +110,24 @@ for parameter preservation and Replay CSV for desktop comparison. FIR exports re
 available. Compare normal false events, missed collisions, latency and Score peaks on
 your recordings before concluding that MLP improves detection.
 
+## JSON model export
+
+Open **Export Profile** to see every qualified kernel with Kernel ID, History/taps, threshold and qualified range. Choose **Export JSON…** on the desired row; no selection on a previous page is required. Rows that cannot preserve the JSON execution contract show a reason. The page no longer contains header-format or header-export controls.
+For each selected model, edit its display name and then choose a `.json` filename in
+the save dialog. The filename and embedded name are independent. Existing files require
+an explicit replacement confirmation; cancellation stops the remaining export dialogs.
+Each file contains one frozen model, its Internal/External XYZ input contract in `g`,
+preprocessing, residual normalization, detector settings, and provenance.
+
+JSON export preserves the qualified Float32 or Float64 type. It does not check device
+RAM, tap capacity or supported device rates. A profile must already be qualified with
+`1_OF_1` confirmation; multi-sample-qualified detectors are rejected with an explanation
+instead of silently changing their behavior. MLP and single-IMU JSON deployment are
+outside this release. Existing header and Model TXT export remain available.
+
+This desktop export does not establish successful device import or inference parity.
+The device independently validates its supported precision, dimensions and rate.
+
 ## Verify
 
 ```powershell

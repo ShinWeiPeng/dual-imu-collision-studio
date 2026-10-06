@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
+from dataclasses import asdict
 
 import numpy as np
 
@@ -152,6 +154,145 @@ class ProfileExportService:
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
         ).encode("ascii")
         return hashlib.sha256(encoded).hexdigest()
+
+    @classmethod
+    def default_model_name(cls, profile: SemanticProfile) -> str:
+        cls.default_filename(profile.kernel_id)
+        if not np.isfinite(profile.sample_rate_hz) or profile.sample_rate_hz <= 0:
+            raise ValueError("sample rate must be finite and positive")
+        number = profile.kernel_id.removeprefix("fir-")
+        return f"FIR_{profile.sample_rate_hz:g}Hz_{number}"
+
+    def render_json(
+        self,
+        profile: SemanticProfile,
+        model_name: str,
+        *,
+        input_units: str,
+        release_ratio: float,
+        release_quiet_time_s: float,
+    ) -> str:
+        """Encode one frozen qualified FIR model without a device-capacity gate."""
+        if profile.model_family != "fir":
+            raise ValueError("JSON deployment export supports dual-IMU FIR/Ridge only")
+        if not isinstance(profile.tap_count, int) or profile.tap_count < 1:
+            raise ValueError("FIR tap count must be a positive integer")
+        self._validate(profile)
+        if profile.confirmation_mode != "1_OF_1":
+            raise ValueError(
+                "JSON export requires qualification with 1_OF_1 confirmation; "
+                "multi-sample confirmation cannot be changed during export"
+            )
+        if (
+            not isinstance(model_name, str)
+            or not model_name.strip()
+            or any(unicodedata.category(char) in {"Cc", "Cs"} for char in model_name)
+        ):
+            raise ValueError(
+                "model name must be nonblank Unicode without control characters"
+            )
+        if input_units not in {"g", "m/s^2"}:
+            raise ValueError("explicit acceleration input units are required")
+        if profile.scale_method not in {"STD", "MAD"}:
+            raise ValueError("unknown residual scale method")
+        if profile.score_mode not in {"MAX_ABS", "L2_NORM"}:
+            raise ValueError("unknown residual score mode")
+        if not isinstance(profile.robust_k, int) or profile.robust_k < 0:
+            raise ValueError("robust_k must be a nonnegative integer")
+
+        dtype = np.dtype(profile.numeric_type)
+
+        def numbers(values):
+            with np.errstate(over="ignore", invalid="ignore"):
+                result = np.asarray(values, dtype=dtype)
+            if not np.all(np.isfinite(result)):
+                raise ValueError(
+                    "execution numbers must be finite in the selected numeric type"
+                )
+            return result.tolist()
+
+        rate = float(profile.sample_rate_hz)
+        if not np.isfinite(rate) or rate <= 0:
+            raise ValueError("sample rate must be finite and positive")
+        threshold = numbers(profile.threshold)
+        scales = numbers(profile.residual_scales)
+        ratio = numbers(release_ratio)
+        quiet = float(release_quiet_time_s)
+        if threshold <= 0 or any(value <= 0 for value in scales):
+            raise ValueError("threshold and residual scales must be positive")
+        if not 0 < ratio < 1 or not np.isfinite(quiet) or quiet <= 0:
+            raise ValueError("frozen release settings must be finite and valid")
+        execution = {
+            "format": "collision-model-parameters",
+            "schema_version": 1,
+            "model_family": "dual_imu_fir",
+            "numeric_type": profile.numeric_type,
+            "required_sample_rate_hz": rate,
+            "input": {
+                "input_sensor": "Internal",
+                "target_sensor": "External",
+                "axes": ["X", "Y", "Z"],
+                "units": input_units,
+                "feature_order": "input_axis_then_lag",
+                "weight_order": "output_axis_input_axis_lag",
+                "lag_order": "current_to_past",
+                "calibration": "as_recorded_during_qualification",
+                "axis_transform": "none",
+                "arithmetic": "non-FMA; output-input-lag; round-to-nearest-ties-to-even; correctly-rounded-sqrt",
+            },
+            "model": {
+                "tap_count": profile.tap_count,
+                "weights": numbers(profile.weights),
+                "biases": numbers(profile.biases),
+            },
+            "preprocessing": {"mode": "bypass", "additional_model_filter": "none"},
+            "residual": {
+                "centers": numbers(profile.residual_centers),
+                "scales": scales,
+                "scale_method": profile.scale_method,
+                "robust_k": profile.robust_k,
+                "score_mode": profile.score_mode,
+            },
+            "detector": {
+                "baseline_threshold": threshold,
+                "confirmation_mode": profile.confirmation_mode,
+                "comparison": "score>threshold",
+                "release_ratio": ratio,
+                "release_quiet_time_s": quiet,
+            },
+        }
+        canonical = json.dumps(
+            execution,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        payload = execution | {
+            "model_name": model_name,
+            "provenance": {
+                "kernel_id": profile.kernel_id,
+                "source_profile_schema": profile.schema_version,
+                "execution_sha256": hashlib.sha256(canonical).hexdigest(),
+                "qualified_profile_sha256": self.semantic_hash(profile),
+                "outer_round": profile.outer_round,
+                "inner_round": profile.inner_round,
+                "initial_fit_rows": profile.initial_fit_rows,
+                "refit_rows": profile.refit_rows,
+                "cross_validation_fold_count": profile.cross_validation_fold_count,
+                "cross_validation_evidence_level": profile.cross_validation_evidence_level,
+                "coverage": [asdict(row) for row in profile.coverage],
+                "qualified_speed_range": profile.qualified_speed_range,
+                "covered_offsets_mm": profile.covered_offsets_mm,
+                "excluded_offsets_mm": profile.excluded_offsets_mm,
+            },
+        }
+        return (
+            json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+            )
+            + "\n"
+        )
 
     def _validate(self, profile: SemanticProfile) -> None:
         if not profile.qualified:

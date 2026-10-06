@@ -44,7 +44,7 @@ flowchart TD
 | `process_diagnostics` | L1 | domain | `studio_application` | implemented | Define privacy-bounded process and Learning diagnostic records independently of persistence technology. |
 | `data_workspace` | L1 | domain | `studio_application` | implemented | Own imported recordings, mappings, test conditions, cycles, annotations, and derived Normal regions. |
 | `learning_qualification` | L1 | domain | `studio_application` | implemented | Fit independently selected FIR and custom-depth MLP candidates, retain original fold kernels and replay exact frozen predictions across supplied conditions. |
-| `profile_export` | L1 | domain | `studio_application` | implemented | Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact. |
+| `profile_export` | L1 | domain | `studio_application` | implemented | Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters. |
 | `project_session` | L1 | domain | `studio_application` | implemented | Own the versioned semantic project document, source-integrity rules, and transactional reopen/save contract. |
 | `desktop_adapter` | L3+ | adapter | `-` | implemented | Present the Qt Quick interface, execute analysis and large artifact exports off the UI thread, and atomically write approved header, Replay CSV, and Model TXT artifacts. |
 | `history_worker_adapter` | L3+ | adapter | `-` | implemented | Execute immutable candidate-fold or complete-recording jobs in bounded reusable Windows spawn workers. Legacy History execution remains available only for compatibility tests; Start Learning uses learning.execution. |
@@ -113,7 +113,7 @@ flowchart TD
 
 ### `profile_export`
 
-- **Purpose:** Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact.
+- **Purpose:** Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
 - **Parent:** `studio_application`
 - **Implementation Status:** `implemented`
 - **Input Ports:** `profile.command`
@@ -364,6 +364,10 @@ flowchart TD
 
 | ID | Owner | Declaration | Type | Visibility | Mutability | Read authority | Write authority |
 |---|---|---|---|---|---|---|---|
+| `json-export-queue` | `desktop_adapter` | `jsonExportQueue` (file-static, `src/dual_imu_collision_studio/qml/Main.qml`) | `var` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
+| `json-export-current` | `desktop_adapter` | `jsonExportCurrent` (file-static, `src/dual_imu_collision_studio/qml/Main.qml`) | `var` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
+| `json-export-target` | `desktop_adapter` | `jsonExportTarget` (file-static, `src/dual_imu_collision_studio/qml/Main.qml`) | `url` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
+| `json-export-error` | `desktop_adapter` | `jsonExportError` (file-static, `src/dual_imu_collision_studio/qml/Main.qml`) | `string` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
 | `recordings-viewport-before-wizard` | `desktop_adapter` | `recordingsViewportY` (file-static, `src/dual_imu_collision_studio/qml/Main.qml`) | `real` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
 | `mapping-wizard-validation-error` | `desktop_adapter` | `validationError` (file-static, `src/dual_imu_collision_studio/qml/MappingWizard.qml`) | `string` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |
 | `recent-adopted-filter-parameters` | `desktop_adapter` | `recentFilterParameters` (file-static, `src/dual_imu_collision_studio/qml/MappingWizard.qml`) | `var` | private | owner-mutable | `desktop_adapter` | `desktop_adapter` |

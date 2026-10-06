@@ -60,6 +60,7 @@ pytest-*/
 /architecture/change-plans/*-verification.md
 /evidence/
 /test-results/
+/artifacts/
 /playwright-report/
 
 # Local benchmark projects, analysis output, and document inspection caches

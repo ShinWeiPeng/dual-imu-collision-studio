@@ -3198,6 +3198,154 @@ class StudioController(QObject):
     def selectRetainedKernel(self, index: int) -> None:
         self.previewKernel(index)
 
+    def _json_export_text(self, kernel_id: str, model_name: str) -> str:
+        if self._run_state not in {"Complete", "Cancelled"}:
+            raise ValueError(
+                "JSON export requires current qualified dual-IMU FIR results"
+            )
+        profile = next((p for p in self._profiles if p.kernel_id == kernel_id), None)
+        if profile is None:
+            raise ValueError("Choose a current qualified model before JSON export")
+        candidate = next(
+            (c for c in self._retained_candidates if c.candidate_id == kernel_id), None
+        )
+        config = candidate.detector_config if candidate is not None else None
+        if config is None:
+            # Historical SemanticProfile/header contract fixes these release settings.
+            config = DetectorConfig(
+                profile.numeric_type,
+                profile.score_mode,
+                profile.confirmation_mode,
+                profile.threshold,
+            )
+        if (
+            config.numeric_type != profile.numeric_type
+            or config.confirmation_mode != profile.confirmation_mode
+            or config.score_mode != profile.score_mode
+            or config.threshold != profile.threshold
+        ):
+            raise ValueError("Frozen detector and qualified profile are inconsistent")
+        return self._export.render_json(
+            profile,
+            model_name,
+            input_units="g",
+            release_ratio=config.release_ratio,
+            release_quiet_time_s=config.release_quiet_time_s,
+        )
+
+    @Property("QVariantList", notify=stateChanged)
+    def jsonExportKernels(self) -> list[dict]:
+        candidates = {c.candidate_id: c for c in self._retained_candidates}
+        rows = []
+        for profile in self._profiles:
+            if not profile.qualified:
+                continue
+            reason = ""
+            if self._run_state not in {"Complete", "Cancelled"}:
+                reason = "JSON export requires current qualified results."
+            elif profile.model_family != "fir":
+                reason = "JSON export supports dual-IMU FIR/Ridge only."
+            elif profile.confirmation_mode != "1_OF_1":
+                reason = "JSON export requires qualification with 1_OF_1 confirmation."
+            candidate = candidates.get(profile.kernel_id)
+            rows.append(
+                {
+                    "kernelId": profile.kernel_id,
+                    "kernelDepth": f"{profile.effective_history_ms:g} ms / {profile.tap_count} taps",
+                    "threshold": f"{profile.threshold:.9g}",
+                    "qualifiedRange": self._discrete_speed_text(
+                        candidate.passing_speeds
+                    )
+                    if candidate is not None
+                    else self._range_text(profile.qualified_speed_range),
+                    "exportable": not reason,
+                    "exportReason": reason,
+                }
+            )
+        return rows
+
+    @Slot(str, result="QVariantList")
+    def prepareJsonExport(self, kernel_id: str) -> list[dict]:
+        profile = next((p for p in self._profiles if p.kernel_id == kernel_id), None)
+        if profile is None:
+            self._status_message = (
+                "JSON export unavailable: model is no longer qualified."
+            )
+            self.stateChanged.emit()
+            return []
+        name = self._export.default_model_name(profile)
+        reason = self.validateJsonModelName(kernel_id, name)
+        if reason:
+            self._status_message = f"JSON export unavailable: {reason}"
+            self.stateChanged.emit()
+            return []
+        return [
+            {
+                "kernelId": kernel_id,
+                "modelName": name,
+                "sampleRate": profile.sample_rate_hz,
+                "numericType": profile.numeric_type,
+            }
+        ]
+
+    @Slot(result="QVariantList")
+    def prepareJsonExports(self) -> list[dict]:
+        rows = []
+        try:
+            for profile in self._profiles:
+                if profile.kernel_id not in self._selected_kernel_ids:
+                    continue
+                name = self._export.default_model_name(profile)
+                self._json_export_text(profile.kernel_id, name)
+                rows.append(
+                    {
+                        "kernelId": profile.kernel_id,
+                        "modelName": name,
+                        "sampleRate": profile.sample_rate_hz,
+                        "numericType": profile.numeric_type,
+                    }
+                )
+            if not rows:
+                raise ValueError(
+                    "Select at least one qualified FIR model before JSON export"
+                )
+        except (ValueError, TypeError, OverflowError) as exc:
+            self._status_message = f"JSON export unavailable: {exc}"
+            self.stateChanged.emit()
+            return []
+        return rows
+
+    @Slot(str, str, result=str)
+    def validateJsonModelName(self, kernel_id: str, model_name: str) -> str:
+        try:
+            self._json_export_text(kernel_id, model_name)
+        except (ValueError, TypeError, OverflowError) as exc:
+            return str(exc)
+        return ""
+
+    @Slot(str, str, QUrl, bool, result=str)
+    def exportJsonModel(
+        self, kernel_id: str, model_name: str, destination: QUrl, replace: bool
+    ) -> str:
+        try:
+            if not destination.isLocalFile():
+                raise ValueError("Choose a local JSON destination")
+            text = self._json_export_text(kernel_id, model_name)
+            path = AtomicProfileWriter.write_json(
+                destination.toLocalFile(), text, replace=replace
+            )
+        except FileExistsError:
+            self._status_message = "JSON file already exists; choose Replace or Cancel."
+            self.stateChanged.emit()
+            return "exists"
+        except (OSError, ValueError, TypeError, OverflowError) as exc:
+            self._status_message = f"JSON export failed: {exc}"
+            self.stateChanged.emit()
+            return "error"
+        self._status_message = f"Exported JSON model {model_name} to {path}"
+        self.stateChanged.emit()
+        return "saved"
+
     @Slot(str, result=bool)
     def prepareSelectedExport(self, url_text: str) -> bool:
         if not self.canExportSelected:

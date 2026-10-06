@@ -1,43 +1,30 @@
 ---
 spec_version: 1
 spec_id: SPEC-0039
-revision: 177
-status: working
+revision: 185
+status: confirmed
 change_set: model-parameter-export
 working_id: WORKING-SPEC-01a0a7a57a23-model-parameter-export
-task_ref: 01a0a7a5-7a23-79c3-99c5-ba374eef801b
+task_ref: 01a0c356-d77c-7421-935c-72e5a478a492
 ---
 
 # Software model parameter export for ESP32
 
 ## Synchronization Status — 2026-09-21
 
-**Working contract, not implementation-ready.** DEC-090 supersedes the earlier desktop capacity/history restriction: software choices and export remain user-controlled; firmware still enforces real fixed-buffer bounds. Current deployment is dual-IMU FIR/Ridge only and fixed reusable RAM. REQ-025/027/063/065/090–092 and DEC-087–089 supersede any older family, per-model allocation/release, or no-capacity-limit wording elsewhere. Historical DEC/DISC/audit records remain unchanged. Single-IMU-specific REQ-029 and associated acceptance are deferred from ESP32 release scope; existing desktop functionality is retained. Fixed storage is owned by collision; instance lifetime does not free that reservation. All existing JSON/UI/threshold/fallback/telemetry contracts remain unless explicitly superseded. Full RAM budget, maximum taps and acceptance margins remain OD-010.
+Current scope updated on 2026-09-22 by explicit user instruction: desktop JSON export only. Firmware import/runtime, ESP32 RAM and device verification are excluded and are not acceptance prerequisites. Historical decisions and discussion remain historical; DEC-094 and current Requirements/Acceptance Criteria govern this revision.
 
 ## Problem
 
-Existing desktop export does not provide the agreed complete JSON deployment contract for dual-IMU FIR/Ridge. This specification defines desktop export and receiver interoperability, aligned with the separate env_sensing device contract.
+Export Profile currently hides JSON export behind a previous-page selection and devotes the page to unused header controls. Users need all qualified kernels and model metadata with directly accessible JSON export.
 
 ## Solution
 
-Export one qualified model per JSON file, preserving frozen preprocessing/detector semantics and selected numeric precision for dual-IMU FIR/Ridge. Provide per-model name/filename editing, and keep device import, Apply and Save distinct. Shared device contracts below define export compatibility; their implementation belongs to env_sensing. Desktop receiving software preserves valid subscribed fields while treating designated missing-value markers as gaps.
+Provide a full-width qualified-kernel list with four metadata columns and one JSON export action per row, preserving existing desktop JSON semantics and safe file writing.
 
 ## Current Decision Summary
 
-This section summarizes current requirements; Decisions and Discussion Context retain historical alternatives and explicit supersession. Current Requirements and later superseding decisions govern.
-
-| Area | Confirmed behavior |
-|---|---|
-| Artifact | One qualified model per JSON; dual-IMU FIR/Ridge only; frozen Float32/Float64 parameters and execution settings. |
-| Device UI | Device Configuration only; import/selected preview plus applied summary; independent default-on collision/warning switches. |
-| Import / Apply / Save | Separate actions. Import pauses/restores IMU and stores without activation. Ordinary successful model Apply leaves collision disabled. Save persists applied configuration. |
-| Storage and RAM | Multiple JSON files in Flash; one fixed reusable FIR/Ridge RAM reservation, bounded streaming scratch; exact capacity remains OD-010. |
-| Calculation | One common dispatch site; original/model families share ProcessResult(status,error); one eligible score above threshold triggers. |
-| Threshold | JSON baseline times the common effective multiplier; original algorithm retains legacy meaning of the shared setting; knob 0.50 through 4.25 in 0.25 steps. |
-| Failure | Load failure falls back to original while preserving enable; actual runtime numeric error disables collision, retains model and logs once. |
-| Telemetry | Imported mode 536=score and 540=effective threshold from same evaluation; other legacy collision fields not applicable. Fixed Float32 output; binary missing-value NaN; existing last-frame downsample; other valid signals continue. |
-| Architecture | Device Management owns storage/configuration siblings. Sensor Pipeline owns loader/collision siblings and mapping. firmware_system coordinates cross-parent operations; Data Services governs Flash access. |
-| Evidence | Design confirmed only; all implementation, resource/timing, interoperability and device acceptance evidence remains pending. |
+Desktop JSON export and Export Profile UI only. Both Float32 and Float64 are preserved; input units are g. No firmware implementation, memory budget or physical-device evidence belongs to this delivery.
 
 ## User Stories
 
@@ -47,182 +34,105 @@ This section summarizes current requirements; Decisions and Discussion Context r
 
 | ID | Requirement |
 |---|---|
-| REQ-001 | Treat model parameters as the requested deployment form. Use JSON exchange under REQ-004; shared schema and transfer semantics follow REQ-044 through REQ-049. |
-| REQ-002 | Keep this software specification in dual_imu_collision_studio and the firmware specification in env_sensing. Link counterpart contracts and reconcile shared artifact semantics before confirmation. |
-
-| REQ-003 | First release uses software model-parameter file export, followed by user import through the env_sensing Web UI, device validation and persistent model storage, then later explicit selection and Apply under REQ-020. Model import and device-configuration Save are distinct operations. |
-
-| REQ-004 | First-release model parameter exchange files shall use JSON for software export and env_sensing Web import. Device persistent model representation is also JSON under REQ-028. Preserve numeric precision under REQ-026; shared schema follows REQ-044/045. |
-
-| REQ-005 | Each JSON artifact shall contain exactly one model and its complete required execution settings, including model parameters and applicable preprocessing/detector settings. Exporting multiple selected models produces separate files. This does not select device storage or concurrent inference count. |
-
-| REQ-006 | The device shall persist multiple independently imported models and provide a Web model list, active-model selection and deletion management. Exactly one selected model executes at a time. Switching among retained models shall not require uploading their files again. New-model import follows REQ-020 without activation. Deletion of the applied model follows REQ-018. Storage uses actual available capacity and transactional failure handling under REQ-046/047, without a predicted-resource gate. The firmware owns this behavior; software artifacts remain independently exportable under REQ-005. |
-
-| REQ-007 | Model selection shall take effect through Web Apply without rebooting ESP32. After Apply, stop collision judgment as clarified in DEC-008; reference the existing TCP configuration quiescence path, including temporary physical acquisition stop. Successful model Apply resumes physical acquisition under REQ-012 while collision detection remains disabled. Do not automatically resume collision judgment for ordinary model Apply; load-failure and deletion-driven automatic application follow REQ-016 and REQ-018 exceptions. Switching, readiness and recovery follow REQ-043/047 and Technical Contract. This is firmware-owned behavior; software export remains independent of device operation. |
-
-| REQ-008 | Provide independent collision-detection and acceleration-warning enable/disable controls in env_sensing. Disabling either function suppresses its new detections independently of the other function and does not require IMU acquisition or telemetry to remain stopped. Existing collision-alarm outputs follow REQ-017; switch persistence/defaults and Web behavior follow REQ-009 and REQ-010. Processing follows REQ-043, and control scope follows REQ-048. Software export must not infer these device-control values from model parameters. |
-
-| REQ-009 | Web Device Configuration shall expose separate collision-detection and acceleration-warning checkboxes matching the existing Orientation boolean-control interaction. Checking/unchecking edits Draft; Apply changes runtime configuration; Save persists the applied values; reboot restores saved values. Save alone does not apply an unsubmitted Draft. Follow existing configuration state feedback and editing lifecycle. Defaults and migration follow REQ-010. These are firmware device settings, not a desktop orientation feature. |
-
-| REQ-010 | Both collision-detection and acceleration-warning switches default to enabled for new/default device configuration. For supported older configurations missing either field, initialize that missing field to enabled. Preserve explicitly saved disabled values and independent mixed states. Boot restores saved settings per REQ-009; defaults are not reapplied over valid saved values. |
-
-| REQ-011 | Models in this change set serve collision judgment only. Acceleration warning remains an independent device function: collision model import, selection and Apply shall preserve its enable state and threshold/algorithm settings. Collision model JSON shall not control acceleration warning. Temporary shared-acquisition quiescence is distinct from disabling the warning setting. |
-
-| REQ-012 | Ordinary successful model Apply (excluding automatic fallback under REQ-016 and REQ-018) shall temporarily quiesce IMU acquisition using the referenced configuration coordination approach, load/init the selected model, then resume acquisition while keeping collision detection disabled. Reflect the disabled collision state in the Web configuration checkbox. Preserve acceleration-warning settings and let it operate on resumed valid samples according to those settings. Collision judgment resumes only after the user explicitly checks collision detection and Applies; it must then reset transient state and honor model history/filter readiness under REQ-043. Apply does not implicitly Save device settings. Failure recovery follows REQ-047 and Technical Contract. |
-
-| REQ-013 | The software JSON shall declare the model required sampling rate. Firmware Apply shall compare it with the actual effective rate supplied to the model, not transport publication rate. On mismatch, reject before stopping the running pipeline or changing model/settings; preserve the active model and device configuration. The Web explanation shall identify the selected model, its required rate and current effective input rate in Hz, and instruct the user to configure a compatible rate before retry. Do not automatically adjust sampling or resample. Prevent stale validation from admitting a concurrently changed incompatible configuration. |
-
-| REQ-014 | Retain the original env_sensing collision algorithm as a selectable option and add a Web collision-model selection control listing the original algorithm plus one entry for each loadable retained imported model under REQ-015. With collision detection enabled, execute only the selected method, not an ensemble or simultaneous original/model detectors. The collision-detection checkbox controls that selected method; acceleration warning remains independent. Preserve original algorithm semantics while retaining the common numeric value across switches under REQ-038; imported-model parameters remain separate. Apply a changed selection through the established compatibility and activation lifecycle. A device with no imported model can still use the original method. |
-
-| REQ-015 | Collision-model selection shall expose one distinct entry per loadable imported model artifact, not one per algorithm family or sampling rate. Each entry identifies the model and its required sampling rate in Hz; multiple same-family or same-rate artifacts remain distinct. If N imported artifacts are loadable, show N imported choices plus the retained original algorithm. Omit artifacts found unloadable from this selector; do not implicitly delete them. Mere sampling-rate mismatch against current device input does not make an otherwise valid model unloadable or hide it: retain its entry and reject incompatible Apply under REQ-013. A previously selected model that fails to load follows REQ-016. |
-
-| REQ-016 | If the selected imported model cannot load and is excluded from the selector, automatically select and apply the original collision algorithm without manual Apply, preserving the prior collision-detection enable state. If enabled, automatically resume judgment with the valid/ready original method; if disabled, remain disabled. At boot use the enable value restored from saved configuration (or the defined migration/default), not an arbitrary startup value. Web shall show the applied original method, preserved checkbox value and failure reason. Preserve acceleration-warning settings. This replaces the previous forced-disable rule for load failure. Recovery does not implicitly Save the fallback selection; persistence for deletion is separately defined by REQ-019. |
-
-| REQ-017 | When collision detection becomes disabled, suppress new collision detections and retriggers immediately, but let an already-triggered collision alarm output finish its existing remaining duration under its original timing policy. Do not clear the active alarm early, restart its hold timer, or erase existing event records as a consequence of disabling. Apply this rule to manual disable, model Apply and failure fallback. Keep acceleration-warning behavior independent. |
-
-| REQ-018 | Allow deletion of the currently applied imported model. On successful deletion, automatically select and apply the original collision algorithm, preserving the collision-detection enable value immediately before deletion: enabled stays enabled and judgment resumes with the valid/ready original method without manual checkbox Apply; disabled stays disabled. Web shall show the applied original method, retained checkbox value and deletion/switch result. Preserve acceleration-warning settings. Use coordinated switching without reboot and never continue inference through a deleted model. This is an explicit exception to ordinary model Apply disabling under REQ-007/012; load-failure fallback under REQ-016 likewise preserves enable state. Persist the replacement selection under REQ-019 without implicitly saving other settings. |
-
-| REQ-019 | When deleting the currently applied model A, if saved model selection also references A, automatically persist original algorithm as the replacement saved selection as part of successful deletion. Update only that saved selection: do not implicitly Save runtime or Draft values for collision enable, acceleration warning or other device settings. If saved selection references another valid method, leave it unchanged. After successful deletion and reboot, restore the repaired selection and the independently saved settings; never report successful deletion with a stale saved reference to A. |
-
-| REQ-020 | Successful import of a new valid model shall persist the artifact and add its eligible entry to the collision-model selector without automatically selecting or applying it. Preserve the currently applied collision method, collision-enable value and independent acceleration-warning settings. The user must select the imported model and explicitly Apply to switch; REQ-012 and REQ-013 then govern activation. Import does not implicitly Save device configuration or change its saved selection. A valid loadable model with a different required input rate may be stored/listed under REQ-015; reject incompatible Apply under REQ-013. |
-
-| REQ-021 | Importing a model with the exact same case-sensitive display name under REQ-041 as an existing device model but different parameter content shall prompt the user whether to replace the existing model. Replace only after explicit confirmation and successful artifact validation/storage; cancellation or invalid replacement preserves the old model. Explain the existing and incoming model identity and required sampling rates before confirmation. Successful replacement updates the existing catalog entry rather than silently adding a second same-name model. Replacement of the currently running model follows REQ-023 and requires later manual Apply during the current session or boot loading under REQ-024; confirmation alone does not change the running parameters. |
-
-| REQ-022 | Software JSON export shall allow editing both model display name and JSON filename. Default model name uses model type, required sampling rate in Hz and stable model number, separated by underscores, for example FIR_1000Hz_k001. Do not inject a new export timestamp into this default. Carry the chosen model name inside the JSON for device display and REQ-021 conflict matching. Initially suggest the model name plus .json as filename; users can choose a different filename. A filename change alone must not modify the embedded model name. Shared name/path validation follows REQ-041/045 and Technical Contract. Firmware owns embedded-name consumption/display/matching; software owns both export inputs, default naming and serialization. |
-
-| REQ-023 | If confirmed same-name replacement targets the currently applied model, store the validated replacement but keep runtime using its existing parameter snapshot until explicit user Apply or restart under REQ-024. Replacement alone must not change current collision-enable or acceleration-warning settings, activate new parameters, or invalidate the running snapshot. Web shall mark the stored model as pending Apply and distinguish executing and stored versions even when their display name is identical. Subsequent Apply uses the stored replacement and follows REQ-012/013; a preflight rejection leaves the running snapshot/settings unchanged. Restart before Apply loads the latest committed version for the saved model selection under REQ-024; pending Apply describes the current session, not a durable old-version activation lock. |
-
-| REQ-024 | After confirmed same-name replacement, a restart shall load the latest successfully stored model parameters when saved boot selection refers to that model, even if no manual Apply occurred before restart. Validate the stored version against boot configuration and readiness before execution; on inability to load/use it, follow REQ-016 fallback and preserve the boot-restored collision-enable value. Restore collision and acceleration-warning switches from saved device settings independently of import; boot is not an implicit Save of unsaved runtime switches. The old runtime snapshot may remain in RAM until explicit Apply or restart under REQ-023. Do not require durable old-version retention solely to preserve pending activation across reboot. This does not remove safe update/rollback requirements for interrupted or failed writes, or their temporary storage overhead. |
-
-| REQ-025 | First-release ESP32 deployment supports dual-IMU FIR/Ridge only. Desktop ESP32 JSON export and firmware interpretation/runtime exclude dual-IMU MLP and single-IMU causal Ridge. Existing desktop simulation/training for those families is retained; removing those features is out of scope. Ridge training stays on the desktop; no training or matrix solver is required on ESP32. |
-
-| REQ-026 | JSON export and ESP32 loading shall preserve each model deployment profile's already-verified numeric type, float32 or float64, and its corresponding parameter interpretation. Declare this type explicitly in the shared artifact; do not silently narrow float64 to float32 at serialization, parsing or inference. Do not perform automatic deployment-suitability/resource admission; follow REQ-027 and report actual inability to interpret/load an artifact as an operation error. Preserving type is not proof of bit-identical inference or target feasibility; numerical parity is governed by REQ-049 and Technical Contract. |
-
-| REQ-027 | Users choose software functionality and judge deployment suitability. Do not constrain desktop history options or JSON export using ESP32 RAM, maximum taps or predicted resource suitability. Preserve existing model qualification, format and numeric validity checks and the FIR-only deployment scope. Firmware must still enforce actual fixed-buffer bounds and reject an unsupported or oversized model before an out-of-bounds write; follow the existing stage-specific error/fallback rules. Do not silently narrow precision. |
-
-| REQ-028 | Persist imported model artifacts as JSON in device Flash, not a separate binary model-parameter format. Successful import stores the JSON without automatically applying it; Apply or boot reads the stored JSON and parses it into the execution representation while preserving declared float32/float64 semantics. Import-time validation does not imply activation. Follow REQ-020/021/023/024 for import, replacement and runtime/boot behavior, and REQ-027 for actual parse/read/write/allocation errors and user-owned resource suitability. Model artifacts are separate from the existing general-configuration envelope; do not inherit its 1024-byte wrapper limit. |
-
-| REQ-029 | Deferred from first-release ESP32 scope by DEC-087 and REQ-025. Historical single-IMU source/filter semantics are retained in the discussion history; no single-IMU exporter/loader/runtime implementation is required by this release. Existing desktop simulation remains unchanged. |
-
-| REQ-030 | For imported collision models, retain the JSON-exported threshold as the baseline and compute the runtime comparison threshold as baseline_threshold times effective_multiplier. Physical board knob, Web and CANopen controls shall set the multiplier rather than overwrite the JSON baseline. The multiplier is dimensionless; one effective multiplier feeds the formula, not the product of three independent control values. Web edits follow established Draft/Apply/Save behavior. Display baseline, effective multiplier and resulting threshold distinctly so users can identify what is executing. Preserve other model parameters and acceleration-warning settings. Arbitration follows REQ-031. Shared device-level multiplier ownership follows REQ-032. Boot persistence follows REQ-033. Knob mapping follows REQ-034. Web/CANopen numeric validity follows REQ-035; missing/default multiplier follows REQ-037; CANopen reuses the existing object under REQ-036. The original algorithm retains its legacy threshold and zero-means-knob semantics separately; they are not imported-model multiplier semantics. |
-
-| REQ-031 | Imported-model multiplier arbitration is last effective operation wins: an actual physical knob change, committed Web Apply or valid applied CANopen multiplier setting updates the single effective multiplier; a later effective operation replaces the earlier value. Do not add mutually exclusive knob/software authority modes for imported models. Unchanged knob polling must not reassert its physical position over a later Web/CANopen setting. Web Draft edits alone are not effective operations; Save retains established applied-value persistence semantics. Order concurrent operations by their actual committed application sequence, not by unsynchronized client clocks. Preserve original collision-algorithm threshold behavior, including its zero-means-knob control selection, as separate legacy semantics. No imported-model zero sentinel is inferred. |
-
-| REQ-032 | All imported collision models share one device-level effective multiplier. Switching among imported models retains that multiplier rather than resetting it or restoring per-model values; recompute effective threshold using the newly applied model baseline times the shared multiplier. Knob, Web and CANopen update this common value under REQ-031. Do not introduce per-model multiplier records or alter JSON baselines when switching. Original collision computation remains distinct, but the numeric field is shared across algorithm switches under REQ-038. Acceleration-warning settings remain independent. Boot initialization/persistence follow REQ-033; missing/new default follows REQ-037 and allowed range follows REQ-035. |
-
-| REQ-033 | Persist the shared collision-setting numeric value with the applied device configuration, interpreted as multiplier in imported-model mode under REQ-038. Save persists its applied value, not unapplied Web Draft; boot restores the last saved value. The initial valid knob read establishes only the change-detection position baseline and must not overwrite the restored multiplier, even when the physical position maps to another value. Later actual knob movement, Web Apply and valid applied CANopen settings follow REQ-031. Unchanged scans never reassert knob authority; unsaved runtime changes do not survive reboot as saved values. Missing-field/new-configuration default follows REQ-037; numeric mapping/range follow REQ-034/035. |
-
-| REQ-034 | For imported-model multiplier control, map the 16 physical selector positions to 0.50, 0.75, 1.00, ... , 4.25: multiplier(n)=0.50+(n-1)*0.25. Preserve existing position numbering n=selector for raw 1..15 and n=16 for raw 0. Therefore raw 1=0.50, raw 3=1.00, raw F=4.00 and raw 0=4.25. Use actual accepted knob changes under REQ-031/033; initial/unchanged reads do not override saved or remotely set multiplier. This mapping applies only to imported models; original algorithm retains its existing force/calibration mapping. Web/CANopen values follow REQ-035 and are not limited to this knob mapping. |
-
-| REQ-035 | Web and CANopen multiplier settings shall accept any positive finite value representable by the existing REAL32 setting/transport numeric type; do not restrict to 0.25 increments or the knob range 0.50..4.25, and do not silently round or clamp to knob positions. Zero, negative, non-finite and unrepresentable settings are invalid and leave the applied multiplier unchanged with explicit error feedback. Actual effective-threshold arithmetic must not silently overflow into an invalid comparison value. These are numeric-validity rules, not predictive device-resource admission. A later actual knob change sets its mapped REQ-034 value under last-operation-wins; unchanged position does not override a remotely set value. |
-
-| REQ-036 | Reuse the same collision-setting control and existing CANopen object 0x2007:00 (REAL32), interpreting its value according to the applied collision algorithm. For the original algorithm preserve its existing threshold/calibration and zero-means-knob behavior. For an imported model interpret the setting as the positive finite dimensionless multiplier and compute JSON baseline_threshold times effective_multiplier under REQ-030/035. Do not introduce a separate CANopen multiplier object. Web shall make the current meaning clear through the selected method and setting label/help; unchanged knob reads remain non-operations under REQ-031/033. This defines mode-dependent meaning; numeric continuity across switches follows REQ-038, without multiplication of separate sources or rewriting model JSON. Firmware owns control behavior; desktop exports the baseline. |
-
-| REQ-037 | When imported-model configuration requires initialization with no saved/common setting available, initialize its multiplier to 1.0, so the effective threshold equals the selected JSON baseline. Retain an existing valid shared value during algorithm switching under REQ-038 rather than replacing it with this default. Apply this default to new configuration and supported older configuration lacking a saved multiplier; do not replace any valid saved multiplier. The initial physical-knob observation does not override this initialized value, following REQ-033; later effective operations follow REQ-031. This default concerns imported-model multiplier state and does not change legacy original-algorithm defaults. |
-
-| REQ-038 | Retain the numeric value in the shared collision-setting field when switching collision algorithms; change its interpretation according to the newly applied algorithm under REQ-036. Do not keep or restore separate remembered original-threshold and imported-multiplier values on selection changes. Thus original setting 2 becomes multiplier 2 on switching to an imported model, regardless of any historically used model multiplier such as 1.5. Switching among imported models likewise retains the shared value. Save/boot restore the applied common setting with its saved algorithm selection; selection changes alone do not implicitly Save. Legacy zero on entry to model mode follows the explicit neutral-conversion exception in REQ-039; other invalid numeric inputs retain the existing validation/error contract. Never apply multiplier zero. This refines the earlier independent-settings wording to mean distinct computation semantics, not separate numeric memories. |
-
-| REQ-039 | When switching from the original algorithm with shared setting 0 (legacy knob sentinel) to an imported model, automatically use 1.0 as the destination multiplier and show an explicit Web adjustment notice. Do not require the user to enter another positive value just to complete this transition. Apply the replacement together with a successful model switch; if preflight or activation fails, do not leak a partially committed adjustment into the prior configuration. Preserve established failure/fallback behavior. This is a specific exception to REQ-038 numeric retention, not permission to accept zero as a multiplier or to rewrite a direct zero input while already in model mode. Switching alone does not implicitly Save; normal successful model Apply still leaves collision judgment disabled under REQ-012. |
-
-| REQ-040 | JSON export shall retain the existing software qualification gate: export only a model/Profile that has passed its applicable software validation for the exact frozen model parameters, preprocessing, detector settings and numeric type being exported. Unqualified, failed or not-yet-validated models cannot be exported merely because their arrays are complete. Apply this policy consistently to the supported dual-IMU FIR/Ridge family; preserve their applicable qualification semantics rather than treating FIR-only export availability as the new family limit. Invalid/incomplete parameter files remain rejected independently. This is desktop model-quality qualification against supplied test data, not a prediction or whitelist of ESP32 memory/performance suitability under REQ-027. Firmware consumes the shared artifact contract and need not rerun training-data qualification on device. |
-
-| REQ-041 | Compare embedded model display names case-sensitively for catalog identity and replacement conflicts. Model_A and model_a are distinct names: retain separate artifacts and selector entries without treating a difference solely in letter case as a replacement. Exact same-name changed-content import still requires REQ-021 replacement confirmation. Preserve exported name spelling in JSON and Web display; filename remains independent under REQ-022. |
-
-| REQ-042 | Deferred from first-release ESP32 scope by DEC-087 and REQ-025. Historical single-IMU source/filter semantics are retained in the discussion history; no single-IMU exporter/loader/runtime implementation is required by this release. Existing desktop simulation remains unchanged. |
-
-| REQ-043 | When collision detection is disabled, suspend the selected collision model processing: do not advance model-specific filters, inference history, prediction/residual/score or detector decisions on incoming samples. On re-enable, invalidate old model transient state, initialize the adopted filter state, repeat its applicable warmup and collect sufficient fresh valid history before judgment; do not replay samples accumulated while disabled or reuse stale state. already_filtered models still bypass application filtering/warmup under REQ-042 but must refill strict-past history. Show disabled, warming/not-ready and ready states distinctly. Preserve independent IMU acquisition, telemetry and acceleration-warning behavior; shared work required by those functions continues. Original collision-only processing is likewise suppressed when disabled. Existing alarms finish under REQ-017. This reduces collision-path CPU work; it does not promise zero total device CPU or unload persistent models. |
-
-| REQ-044 | The shared version-1 JSON contract and family semantics are defined in Technical Contract below. Both projects must implement that same contract. Export one complete frozen, qualified execution snapshot, not a training job or executable object. Preserve array shape/order, source identity, rate, preprocessing, residual and detector settings; never infer missing execution parameters from device defaults. |
-| REQ-045 | Use strict UTF-8 JSON and lossless selected-type numeric round-trip. Structural validation covers required fields, supported interpretation/version, finite numbers, family-specific dimensions, consistent input/rate and complete execution settings. Preserve float32/float64 model precision and adopted preprocessing precision independently. Follow Technical Contract numeric and name rules. Export validation does not admit models based on predicted board capacity or timing. |
-| REQ-046 | Model storage uses transactional JSON updates, isolated from the existing 1024-byte general-configuration envelope. A failed or interrupted import/replacement must leave the last committed artifact/catalog recoverable; temporary write data is never advertised as a successfully imported model. Running inference uses an immutable applied snapshot. Do not impose a fixed model count or predicted resource-fit admission; report actual allocation/write/load failures. Delete and repair a saved reference to the deleted model consistently before reporting deletion success; preserve unrelated saved settings. |
-| REQ-047 | Activation and readiness follow the Technical Contract state transitions: validate before mutation, coordinate acquisition/publication quiescence using the existing configuration lifecycle, prepare and commit one selection/settings snapshot, then resume acquisition. Preserve original TCP publication stop/START semantics when that path is used. Rate rejection leaves the running state intact; actual selected-model load failure uses REQ-016 fallback. While disabled, apply REQ-043 rather than maintaining hidden model processing. Actual gaps/reinitialization require fresh applicable history/filter readiness. |
-| REQ-048 | New or migrated configuration without a collision-method selection uses the original algorithm. Save persists the applied method and common numeric setting, with independent enable switches; boot restores the saved combination and newest committed selected model, with fallback as already specified. Model import and JSON content never change device controls. First-release model catalog/selection and the two new checkboxes are Web/device-configuration functions; CANopen reuses the existing numeric setting under REQ-036 without introducing model-transfer or catalog-selection CAN objects. |
-| REQ-049 | Acceptance must exercise the real desktop exporter and firmware loader/runtime, using independent known-answer and failure fixtures for dual-IMU FIR/Ridge and both model numeric types. Serialized parameters must round-trip exactly; inference/readiness/detector semantics must match the declared reference and numeric contract. Test actual interrupted storage, replacement/boot, sampling mismatch, toggles, fallback, selector mapping and competing control updates. Desktop qualification and host tests do not establish physical ESP32 timing/RAM acceptance. Bind implementation evidence to the project verification matrix and device profile before claiming acceptance; missing validation bindings remain BLOCKED, not user model-admission limits. |
-
-| REQ-050 | Place model import, catalog/selection, confirmed same-name replacement and deletion in Device Configuration under REQ-068. Do not add a dedicated Collision Models page. Keep the common threshold/multiplier and independent collision/warning controls with existing Draft/Apply/Save semantics; importing/replacing stores artifacts without implicit selection, Apply or Save. Existing deletion/fallback exceptions remain unchanged. This is firmware Web responsibility; desktop export remains separate. |
-
-| REQ-051 | Device Configuration shall hide fields used only by the original collision algorithm when the draft collision-method selection is an imported model, including vector/individual-axis mode and envelope settings. Preserve their values while hidden and restore their visibility when selecting the original algorithm; hiding must not clear, reset or implicitly apply/save them. Keep the common threshold/multiplier field visible with the meaning of the selected method; actual execution remains the applied method until Apply. Keep independent acceleration-warning controls visible. Changing field visibility is presentation only and must not alter stored model parameters or trigger model activation. |
-
-| REQ-052 | Desktop JSON export shall use a separate export dialog for each selected model, where the user can edit that model display name and JSON filename and choose its own save location. Multiple selected models are handled one at a time rather than in a single bulk-edit naming table with one mandatory shared output directory. Retain stable suggested names under REQ-022, independent embedded name versus filename, qualification validation and one-model-per-JSON semantics. This is desktop UI responsibility; firmware consumes the resulting independent artifacts unchanged. |
-
-| REQ-053 | Display model summaries only within Device Configuration, including the successfully imported model under REQ-068. Show identity/type, required/current rate, input source, applicable version/status and baseline/multiplier/effective threshold; distinguish imported artifact, Draft selection and applied model where different. Do not add a full weights/bias/filter-coefficient viewer or another model-management page. Preserve existing operation/persistence rules. |
-
-| REQ-054 | Firmware CollisionDetector.Process dispatches to one selected synchronous callback implementing the complete collision algorithm: applicable preprocessing, prediction, residual/score calculation, threshold and single-sample trigger/release logic under REQ-058. Original collision processing is an alternative implementation behind the same entry. Same-family artifacts may share code with different loaded parameters. Return the structured detection status and error code under REQ-055; do not interpret model scores as original force values. Acceleration warning remains independent. JSON loading/storage, Web configuration and physical alarm output remain outside the algorithm callback. Preserve disabled-processing/reset/warm-up and Apply/fallback contracts. Callback input must carry the source samples and alignment needed by each family rather than forcing imported models through legacy envelope features. This firmware-owned boundary does not change desktop artifact semantics. |
-
-| REQ-055 | The complete collision-algorithm process callback returns a small by-value ProcessResult containing DetectionStatus and ErrorCode, replacing the bool-only restriction. DetectionStatus is NoCollision, Collision or Error. Normal results carry ErrorCode::None; Error carries a non-None reason, initially including NonFinitePrediction and NonFiniteScore. NoCollision means no trigger reported and includes normal warm-up, insufficient history or unavailable required input; it does not assert that a ready negative judgment occurred. Keep readiness/history private and do not add scores, strings, timestamps, model parameters or dynamic allocations to this return value. Collision is the only trigger result. Error is handled by the outer caller after process returns under REQ-078/079. All original/imported algorithms share this result contract and the common dispatch site. Existing alarm hold remains unchanged. DEC-076 supersedes DEC-051 and the bool-return clause of DEC-053. |
-
-| REQ-056 | Move the original collision invocation to one common logical call site after collision-input preparation. Original collision and dual-IMU FIR/Ridge all use that same CollisionDetector.Process dispatch site and the currently selected callback; do not retain separate pre-pair/post-pair collision call sites by algorithm. Prepared input can represent available single-source data or a complete paired input; complete dual-IMU pairing is not a prerequisite for invoking the common entry. Each selected algorithm privately determines whether its required sources, continuity and history are sufficient and returns NoCollision with ErrorCode::None when not sufficient under REQ-055. Original/single-source algorithms must not wait for an unused IMU solely because they share this entry. Acceleration warning remains independent. This decides logical invocation placement, not new Task/core allocation or a final concrete input type. |
-
-| REQ-057 | Separate algorithm lifecycle operations: initialize with loaded parameters and prepare required working storage/filter/history; reset private history, warm-up and confirmation state while retaining loaded parameters; execute one collision computation returning the REQ-055 ProcessResult. Do not encode initialization/reset as modes of the per-sample execution callback. Models of the same family share the algorithm implementation but use the selected artifact parameters. Applying another model initializes its own runtime without inheriting previous-model history. Re-enabling a retained model resets and warms up without requiring another JSON read. Disabled collision does not execute its collision-specific callback; JSON/Flash access stays outside per-sample execution. Preserve all existing Apply/fallback/switch and precision contracts. |
-
-| REQ-058 | Imported-model collision triggering uses one eligible score strictly greater than the effective threshold; do not require multiple consecutive above-threshold samples. Warm-up/history readiness remains internal and returns NoCollision with ErrorCode::None until sufficient data exist. When only the multiplier changes, retain filter, history and detector runtime state, do not reset or re-warm, and evaluate the next eligible score using the newly committed effective threshold. Do not re-evaluate cached old scores solely on the setting update. This adopts option 2 state continuity but removes its inapplicable multi-sample counter premise. Existing release/re-arm and alarm-output hold rules are unchanged; original-algorithm calculations remain unchanged. Exported detector semantics and qualification/reference traces must agree with this single-sample rule; never silently relabel a multi-sample-qualified detector as equivalent. This requirement supersedes conflicting multi-sample-confirmation wording in the shared Technical Contract and refines REQ-040/044/049/054/057. |
-
-| REQ-059 | Knob, Web and CANopen changes enter the existing common device-setting authority and arbitration rules; algorithm callbacks do not directly read those control sources. Each collision computation receives a coherent fixed snapshot of the selected method and its applicable committed numeric setting. An update committed during that computation applies to the next computation, never halfway through the current one. Original collision retains its legacy threshold interpretation; imported models use JSON baseline times the common multiplier. This does not introduce separate per-source/per-model setting fields, implicit Save, model reload or warm-up on multiplier-only updates. Preserve REQ-031/033/036/038/058. |
-
-| REQ-060 | Each collision algorithm owns and privately manages its filter, history, warm-up and other algorithm runtime state. External orchestration uses its initialize/reset/execute contract rather than directly reading or mutating that private state. CollisionDetector dispatches to the selected algorithm and must not centralize all family-specific mutable state in its own shared state object. Same-family instances use selected parameters with correctly reset private runtime under REQ-057. Configuration, Web and CANopen do not manipulate algorithm histories. Preserve the structured execute result under REQ-055 and single common invocation site. |
-
-| REQ-061 | Use an algorithm operation table of initialize, reset, process and destroy (REQ-065) function pointers bound to an opaque algorithm instance identity/context. Process returns the structured result under REQ-055. Only the owning algorithm implementation may interpret its instance or access private runtime; external orchestration stores/passes the opaque identity and invokes the bound operations. Construct and validate a coherent operation/instance binding before activation; never mix callbacks from one implementation with another implementation instance or replace a binding during an in-flight call. Same-family artifacts share operation code with selected parameters. A virtual-base-class hierarchy is not required for this algorithm dispatch design. Destruction follows REQ-065; exact named types and binding lifetime mechanics remain governed architecture design work. |
-
-| REQ-062 | Do not retain inactive-model parsed-parameter caches after a model switch completes. In steady operation retain only the selected model parsed parameters and private runtime; other imported model artifacts remain in Flash and are read/parsed again when selected. Preserve the separate rule that disabling/re-enabling the same retained model does not require JSON reload. User reports RAM is already tight: minimize model-related resident and transient duplication, and explicitly design/verify switching and JSON-loading peak memory. Transient switching follows retire-before-overwrite in fixed storage under REQ-063; this does not claim measured RAM sufficiency. Preserve actual-error handling and user-controlled suitability under REQ-027. |
-
-| REQ-063 | Apply first performs non-mutating structural, supported-capacity and input-rate preflight; rejection preserves the old runtime. Quiesce and await in-flight callbacks, retire the old binding, then reuse the same fixed model storage for the selected FIR/Ridge parameters/history/state. Never allocate a second complete model or free/reallocate model-sized storage on each switch. Publish only a fully initialized binding. Failure after overwriting invalidates partial state and falls back to the original algorithm, preserving prior collision enable. Successful ordinary model Apply still leaves collision disabled. Stored artifacts and Save semantics remain unchanged. |
-
-| REQ-064 | Load firmware model JSON through streaming parsing with bounded read/parser scratch, without retaining a complete JSON text buffer or full document tree alongside model arrays. After REQ-063 old-binding retirement, fill final typed parameter arrays directly; use additional bounded scanning passes where metadata/shape/validation order requires them rather than a duplicate parameter representation. Preflight scans before retirement validate the artifact without materializing a second model runtime. Keep the validated stored artifact identity stable across passes and activation. Preserve UTF-8/schema/duplicate-key/shape/finite-number checks and exact adopted float32/float64 parsing under REQ-045; streaming does not loosen qualification, sampling-rate or numeric contracts. Reclaim partial allocations on failure and follow existing fallback rules. This changes loading strategy, not JSON exchange/storage format or proof of sufficient target RAM. |
-
-| REQ-065 | Retain initialize/reset/process/destroy lifecycle operations. destroy retires the active instance and clears its validity/private state without freeing the shared fixed model reservation. No retired or in-flight callback may access overwritten storage. Reset/re-enable retains the selected parameters and restarts history/warmup; switching reuses fixed storage after quiescence. Cleanup of temporary I/O/parser resources remains required. This supersedes previous per-instance model heap allocation/release semantics. |
-
-| REQ-066 | Model JSON import/storage is a coordinated temporary IMU-quiescence operation, distinct from model Apply. Before accepting streaming storage, capture the prior acquisition and independent function-enable state and quiesce sampling/processing. Keep the currently applied model parameters resident and selected; import does not destroy/switch it or change persistent settings. During the pause no new IMU-based collision/warning judgment is available; existing alarm expiry follows its established policy. Stream/store/validate under the agreed bounded-memory and transactional rules. On successful completion or terminal failure/abort, release import resources and restore the pre-import acquisition and function-enable state; reset affected continuity/history and accumulate required warm-up before renewed judgment. Do not start acquisition if it was stopped before import. Do not implicitly activate the imported/replaced artifact, Save unrelated settings or bypass existing explicit TCP START semantics. Web clearly indicates the temporary acquisition/judgment interruption using the inline explanation and explicit action under REQ-067. |
-
-| REQ-067 | In the Device Configuration model-import area, display persistent inline explanation that import temporarily pauses IMU sampling and new collision/acceleration-warning judgments, then restores prior state. Label the import action 暫停 IMU 並匯入. Selecting a file alone does not upload/start quiescence; the user explicitly presses the action. Do not add a separate pause-confirmation modal. Preserve the existing explicit same-name/different-content replacement confirmation under REQ-021. Show in-progress pause and final operation outcome consistently with REQ-066; this UI choice does not change import versus Apply/Save semantics. |
-
-| REQ-068 | Use Device Configuration as the single Web location for model import and immediate display of the successfully imported model summary; do not introduce a separate Collision Models management page or navigation route. Keep previously confirmed model catalog/selection/replacement/deletion capabilities accessible within Device Configuration rather than removing them or adding another page. The imported-summary display is presentation, not automatic selection, Apply or Save; distinguish it from the applied model and any existing Draft. Preserve required name/type/rate/source/version/threshold summary content, no full coefficient viewer, inline pause notice, explicit import action and same-name replacement confirmation. This supersedes the earlier dedicated-management-page arrangement under DEC-046 and the retained-separate-page clause of DEC-049. |
-
-| REQ-069 | Device Configuration displays exactly two model summary areas: (1) imported/selected model preview and (2) currently applied model summary. Successful import updates the first area to the imported artifact; changing the collision-model selector replaces that same first area with the selected model summary, without creating a third summary area. The second area reflects the actual applied method/version and changes only when the applied state changes, including successful Apply or previously accepted fallback/deletion recovery. Merely importing, previewing or changing Draft selection does not alter the applied summary or activate a model. Preserve import-without-auto-selection and existing Draft/Apply/Save rules; identify the preview artifact clearly if an import preview differs from the unchanged Draft selection. Both areas show the established summary content only, not full coefficients or an additional management page. Existing import/selection/configuration controls remain available. |
-
-| REQ-070 | Do not provide a user-facing cancel action for an in-progress model import. Once import begins, report its progress and await success or terminal failure, then perform prior-state restoration under REQ-066. This removes optional manual cancellation only: truncated uploads, transport/storage/validation failures and other terminal aborts must still release temporary resources and restore prior acquisition/function state; do not leave sampling indefinitely paused because no cancel button exists. Preserve cancellation/rejection of the distinct same-name replacement confirmation before authorizing replacement under REQ-021. A completed storage commit remains success, not a later cancellation or implicit deletion. |
-
-| REQ-071 | The model section in Device Configuration is directly expanded, not an accordion requiring an expand/collapse operation. Present the established import controls and pause explanation, model selection/common setting and exactly two model summaries on the same page under REQ-067/068/069. Preserve conditional hiding of original-algorithm-only settings under REQ-051 and the existing device-wide Apply/Save interaction. No additional model-management page, full-coefficient viewer or manual Cancel Import control is introduced. |
-
-| REQ-072 | Keep the original collision algorithm and all imported-model collision algorithm implementations inside the existing collision component, with separate implementation files and algorithm-private runtime state for each family. Share the selected initialize/reset/process/destroy callback contract and single CollisionDetector.Process invocation design; do not introduce a separate peer model-inference component for this scope. Algorithm implementations do not read JSON/Flash or depend on Web/CANopen adapters; loading and control supply semantic parameters/inputs through the governed boundary. Source-code coexistence does not allocate inactive model runtime or imply additional RTOS tasks. Preserve separate acceleration-warning behavior. Exact source names and type/state ownership are to be finalized in architecture design before source changes. |
-
-| REQ-073 | Introduce a separate model-storage component/interface to own model catalog access, bounded streaming artifact reads/writes, transactional replacement and deletion. Keep the existing device-configuration store responsible for selected-model reference, independent function switches and the common numeric setting under Save/boot rules. Model JSON artifacts and device configuration remain separately persisted with distinct operation lifecycles; share existing lower-level Flash access coordination where appropriate. This does not require another Flash chip, filesystem or partition and does not create a new runtime Task or inactive-model cache. Storage supplies artifacts/semantic load inputs through governed boundaries, not direct access to collision-private state. |
-
-| REQ-074 | Derive the device model catalog/selector information from committed model JSON artifacts by bounded streaming reads of necessary identity/type/rate/summary metadata; do not maintain a separate persistent model index/catalog file duplicating that metadata. Building the list does not instantiate inference runtimes or retain full parameter arrays for inactive models. Exclude incomplete staging artifacts from enumeration and preserve previously confirmed unloadable-model selector exclusion without inferring deletion. Import/replacement/deletion update committed artifacts and refresh the derived list; reboot can reconstruct it from committed files. Preserve internal storage identifiers, exact case-sensitive embedded names, version identity and transactional recovery under REQ-041/045/046. This selects catalog authority, not a claim that filesystem commit/recovery implementation is already verified. |
-
-| REQ-075 | When an imported collision model is actually applied, retain the original collision Calibration page as read-only: show existing original-algorithm coefficients and explain that force calibration does not calibrate model score or its JSON baseline threshold. Disable calibration sample collection and Save & Apply Calibration, including mutation requests through the backend. To perform original force calibration, explicitly select and Apply the original collision algorithm first. Page availability follows the actual applied algorithm, not an unapplied draft selection. Preserve existing calibration values and the independent IMU zero-offset behavior. |
-
-| REQ-076 | Reject a collision model switch Apply while original collision calibration sample collection is active. Report that the user must finish or cancel calibration and then retry Apply. Reject before quiescing acquisition, destroying runtime, changing applied configuration, or discarding calibration samples. Preserve current algorithm, enable flags, calibration work, and stored coefficients. Enforce admission in firmware as well as UI. Do not automatically queue or retry the rejected switch. |
-
-| REQ-077 | While a model import is in progress, reject competing collision model Apply and model deletion requests immediately with a busy reason identifying model import and asking the user to retry after completion. Do not enqueue, retain, automatically retry, or execute the rejected request later. Enforce in firmware across clients, not merely by disabling controls in the importing browser. Preserve the in-progress import and applied state on rejection. |
-
-| REQ-078 | If actual imported-model computation on otherwise valid input produces a non-finite result (NaN or infinity), do not report that evaluation as a collision. Disable collision detection, retain the selected/applied imported model and display the numeric fault. Do not automatically fall back to the original algorithm or retry inference. Recovery requires explicit user action to reapply a model or select/apply the original algorithm, following existing Apply and enable rules. Keep acceleration warning and shared IMU acquisition independent; stopping collision also stops its private preprocessing/inference. Existing active alarm hold behavior remains unchanged. This is actual execution fault handling, not predictive resource admission; normal warmup, missing history and invalid/missing sensor input are not by themselves model numeric faults. Use the structured process result under REQ-055. DEC-075 supersedes the earlier DEC-074 fallback policy for this runtime-fault case only; actual loading-failure fallback is unchanged. |
-
-| REQ-079 | Emit an abnormal/error log when REQ-078 disables collision after an actual non-finite computation. Use existing diagnostic logging with the applied model identity, numeric-failure reason and action taken (collision disabled; model retained). Identify the failing computation stage where known; do not invent unavailable detail or dump parameter arrays. Emit once for each transition into this fault-disabled state rather than every incoming IMU sample. A new fault after explicit recovery is a new incident and must be logged. |
-
-| REQ-080 | Place the independent model-storage L2 component under device_management_application, as a separate sibling of configuration. Device Management coordinates model catalog/selection and selected-reference repair after deletion, while each component retains its own state and persistence responsibility. Data Services continues to coordinate Flash access rather than owning model catalog/files. firmware_system owns cross-L1 orchestration involving Device Management, Data Services and Sensor Pipeline, including IMU quiescence/resumption and runtime activation. No direct L1 sibling calls or model-storage access to collision-private runtime are introduced. This logical ownership choice creates no new Task, Flash partition, inactive cache or separate Web page. |
-
-| REQ-081 | Separate model-parameter validation/loading from the model-storage component. Model storage owns committed files, transactions and catalog; the independent loader owns shared model-format, shape and numeric-precision validation and parameter delivery through governed interfaces. Validation checks the artifact; loading reads its unchanged coefficients into the final runtime parameter storage, not retraining or transforming the model. Import and Apply reuse validation rules, but import does not activate a model or allocate an additional full runtime. Preserve bounded streaming, no complete JSON tree/text retention or duplicate full parameter arrays, retire-before-overwrite in fixed storage and algorithm-private parameter/runtime ownership. Per-sample process performs no JSON or Flash access. Component separation does not introduce a Task, queue or cache. Concrete source declarations and gate evidence follow the Integrated Architecture Contract and pre-code validation requirements. |
-
-| REQ-082 | Parent the independent model-parameter validation/loading component under sensor_pipeline_application as a sibling of collision. Sensor Pipeline coordinates their parameter-delivery, initialization and partial-failure cleanup through parent-owned mappings rather than direct sibling calls or access to algorithm-private state. firmware_system coordinates cross-L1 import/Apply flows with Device Management model storage and Data Services Flash admission. Import invokes validation-only behavior without activating or building an additional full model runtime; Apply preserves preflight, quiescence, retire-before-overwrite in fixed storage and fallback rules. Model storage remains under Device Management. This logical parent choice does not create another execution Task, full-model buffer, cache or Flash partition. |
-
-| REQ-083 | Collision owns the fixed model reservation and exposes checked preparation/fill/finalization through Sensor Pipeline mappings. Loader streams bounded chunks directly into final typed slots without a second parameter representation or ownership transfer. Validate shape/type/bounds/completeness before activation. No per-model full allocation occurs; destroy invalidates logical state and preserves fixed storage. Import validates without creating a second runtime. |
-
-| REQ-084 | Preserve subscription/output support for applicable signals when an imported collision model is applied. In imported-model mode, register 536 (0x0218) represents the applied model score and register 540 (0x021C) represents its effective comparison threshold (JSON baseline_threshold times effective multiplier), not the multiplier alone. Original collision-specific registers 537-539 and 541-545 report not applicable in this mode; do not substitute zero, stale original values or model values with legacy g semantics. In original-algorithm mode, retain the original 536-545 mappings. Signal names, units and availability must reflect the actually applied algorithm, not an unapplied draft selection. Other applicable subscribed IMU/derived signals continue under their existing availability and acquisition rules; unsupported legacy collision fields must not justify a blanket shutdown of otherwise valid signal outputs. Projection uses the selected algorithm computation, not additional legacy or model inference solely for telemetry. Preserve disabled-collision CPU behavior and ProcessResult status/error contract; no stale or invalid score may be advertised as a current valid result. Signal projection and availability follow REQ-085 through REQ-089 and the Integrated Architecture Contract; exact source/transport implementation is subject to pre-code gates. |
-
-| REQ-085 | Registers 536 (score) and 540 (effective threshold) retain fixed Float32, four-byte external representation for imported models of either numeric type; original algorithm representation is unchanged. Convert Float64 values only at the output/projection boundary, not in model parameters, preprocessing, score computation or the actual detector comparison. Output rounding may make score and threshold appear equal despite a full-precision collision trigger; consumer documentation must distinguish projected values from decision precision. If a finite internal value exceeds the Float32 representable range, report that signal output invalid rather than publishing infinity, clamping, replacing it with zero or reusing stale output. Projection-only range failure is not a model-computation NaN/infinity fault and must not itself trigger REQ-078 collision disable. Other valid subscribed signals continue under REQ-084. |
-
-| REQ-086 | In binary subscribed output, encode an unavailable/not-applicable/not-ready/out-of-Float32-range collision floating-point field using one designated quiet-NaN Float32 marker in its existing four-byte slot, preserving other valid selected fields and packet layout. The marker denotes missing numeric output, not a measurement, zero, collision or reason code. Encoding occurs only at the output boundary from explicit semantic availability, never by feeding the marker into model computation. Actual non-finite model arithmetic returns Error and ends that algorithm invocation under REQ-055/078/079; the caller disables collision and records the incident but independent IMU processing and valid subscribed output continue. Do not propagate that return as a blanket packet failure for these unavailable collision fields. Subscription consumers must recognize the marker as missing data/gaps, not discard unrelated valid fields or interpolate a fabricated value. This binary marker does not authorize nonstandard NaN literals in JSON; signal names/mode/status convey context separately. |
-
-| REQ-087 | Imported-model register 536 score and register 540 effective threshold are projected from one coherent completed model-evaluation snapshot: 540 is the threshold actually used with that score. A multiplier change must not combine a previous score with a newly committed threshold. Publish the new pair after the next valid model evaluation using the new setting; Device Configuration may immediately show the committed setting independently. Read a coherent snapshot even if computation or control updates race with publication. Keep model-native comparison precision and independent Float32 output conversion/range-validity rules under REQ-085/086. Do not reinterpret an old pair as belonging to a new model or newly initialized runtime; existing invalidation and missing-output rules still apply. This output snapshot does not add score fields to ProcessResult or require a full sample-history buffer. |
-
-| REQ-088 | Retain the existing downsample/output-window behavior for imported-model telemetry: select the last input frame at the existing configured window boundary rather than calculating interval maximum score or an average. Registers 536/540 in that selected frame use the coherent model-evaluation projection under REQ-087. Do not add a peak accumulator, history buffer, special model output rate or extra inference for this purpose. Collision detection continues at the model evaluation cadence independently of reduced telemetry rate, retaining the single-eligible-score trigger rule. Downsampled output may omit intermediate score peaks. Missing/invalid collision fields in the selected output follow REQ-086 rather than selecting an earlier valid frame to conceal the gap. |
-
-| REQ-089 | Adopt the Integrated Architecture Contract for desktop export, firmware import/Apply, algorithm lifecycle, fault handling and subscription projection. Collision owns the latest coherent selected-algorithm output snapshot; Sensor Pipeline reads an immutable bounded copy and maps it into publication data, without another inference or a complete model/history buffer. ProcessResult remains status plus error only. Parent mappings, single allocation/mutation authorities and demand-owned technology boundaries in the design tables govern implementation. Exact declarations, manifest/source catalog and design/AST/runtime validation remain required before implementation acceptance; design confirmation does not certify resources, timing, hardware behavior or authorize product changes. |
-
-
-| REQ-090 | Use one reusable fixed-capacity RAM reservation for supported dual-IMU FIR/Ridge deployment. Account for weights, biases, residual values, input history, preprocessing state, inference scratch, metadata and alignment; bound import/parser/network transients separately. Only one model execution state resides in RAM; other JSON artifacts remain in Flash. Disable/re-enable does not reclaim this reservation. No automatic precision narrowing. Static placement versus one-time startup allocation, exact bytes, maximum taps and numeric/preprocessing capacity layout remain explicitly unresolved under OD-010. |
-| REQ-091 | Keep existing software history selections without additional ESP32-capacity filtering. Do not add an ESP32 deployment-purpose selector or capacity-based export prohibition. Users are responsible for selecting suitable options. Existing software algorithm/qualification rules still apply; this does not promise arbitrary history lengths or all-family firmware support. FIR taps retain N=floor(T*fs)+1. Firmware checks N against its actual fixed capacity; exact firmware RAM size and Nmax remain OD-010. The previously suggested 65 taps is not adopted. |
-| REQ-092 | Separate model size calculation, candidate capacity and validated target budget. Reference the 2026-09-18 exploratory heap evidence: recovery free=38124 bytes, largest=27636, boot minimum=984, and a 2312-byte allocation failure. These are workload/build-specific observations, not an available model RAM budget. Validate a chosen fixed reservation with import/Apply/switch, sustained FIR inference, Web configuration and relevant transports; include free/minimum/largest heap, allocation failures and task-stack headroom. Exact acceptance margins and candidate capacity remain OD-010. Root-cause completion of the existing network spike is not a prerequisite to discussing candidates; existing allocation failures cannot be counted as acceptance PASS. |
+| REQ-004 | Desktop export produces a strict UTF-8 JSON artifact for one qualified model. Firmware import and runtime are not deliverables of this specification. |
+| REQ-005 | Each JSON file contains exactly one frozen model and its complete execution settings. Exporting different kernels produces independent files. |
+| REQ-022 | Allow independent editing of model name and filename. Default name is model type, required sampling rate and stable kernel number, such as FIR_1000Hz_k001, without a timestamp. Suggest name plus .json; changing filename does not change embedded name. |
+| REQ-025 | JSON export supports qualified dual-IMU FIR/Ridge only. Preserve existing desktop training and simulation for other families; explain unsupported JSON export without silently changing model family. |
+| REQ-026 | Preserve the declared Float32 or Float64 model precision, exact selected-type numeric values including signed zero, array shapes and ordering. Never narrow precision for export. |
+| REQ-027 | Desktop export adds no ESP32 RAM, taps, rate or capacity gate, warning or capability query. Keep qualification and JSON semantic validation. |
+| REQ-040 | Export only current qualified profiles with the same frozen parameters, preprocessing, detector settings and numeric precision. Recheck current availability when preparing and saving; reject stale, failed, incomplete and invalid results. |
+| REQ-044 | Export a complete frozen execution snapshot including format/version, name, family, numeric type, required rate, input identities, model coefficients, preprocessing, residual, detector and provenance. Do not rerun training or Qualification during export. |
+| REQ-045 | Validate finite numbers, dimensions, rates, positive scales and thresholds, Unicode model names and local JSON filenames. Internal/External XYZ units are user-confirmed g, without conversion. Preserve provenance identity independently of display name and filename. |
+| REQ-049 | Restore exported arrays and settings on the desktop and verify reference prediction and strict threshold behavior in the declared numeric precision. This is desktop roundtrip evidence, with no firmware or device parity claim. |
+| REQ-058 | Preserve frozen single-sample 1_OF_1 detector semantics, threshold, release ratio and quiet time. Do not silently rewrite multi-sample confirmation. Show a reason for an otherwise qualified row that cannot be exported as JSON. |
+| REQ-097 | Export Profile lists all qualified kernels independently of previous-page selection. Each row shows Kernel ID, History/taps, threshold and qualified range, with Export JSON at the far right. Use actual passing speeds when available without inventing continuous coverage. Keep fixed headings, a scrolling body, per-row eligibility reasons and empty-state guidance to Replay & Qualify. Each action opens the existing name and save dialogs for that row alone. |
+| REQ-098 | Remove Header Format, Header Preview, Export Headers and Selected Kernels sidebar from Export Profile. Preserve existing header serialization APIs for other callers. Keep JSON filename validation, explicit overwrite confirmation, atomic commit and failure cleanup; show actionable save errors. |
+
+| REQ-001 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-002 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-003 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-006 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-007 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-008 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-009 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-010 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-011 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-012 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-013 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-014 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-015 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-016 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-017 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-018 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-019 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-020 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-021 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-023 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-024 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-028 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-029 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-030 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-031 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-032 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-033 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-034 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-035 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-036 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-037 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-038 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-039 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-041 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-042 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-043 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-046 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-047 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-048 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-050 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-051 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-052 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-053 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-054 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-055 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-056 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-057 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-059 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-060 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-061 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-062 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-063 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-064 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-065 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-066 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-067 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-068 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-069 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-070 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-071 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-072 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-073 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-074 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-075 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-076 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-077 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-078 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-079 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-080 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-081 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-082 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-083 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-084 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-085 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-086 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-087 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-088 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-089 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-090 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-091 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-092 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-093 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-094 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-095 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
+| REQ-096 | Retired from current desktop delivery by DEC-094. The previous cross-project obligation remains historical and imposes no firmware implementation or device validation requirement on this task. |
 
 ## Decisions
 
@@ -406,6 +316,14 @@ This section summarizes current requirements; Decisions and Discussion Context r
 | DEC-089 | Restore and synchronize the separate firmware model contract under a non-conflicting new SPEC identity; preserve recovered historical snapshot. | User: 有辦法復原?我不小心刪除了; 幫我整理同步。 |
 
 | DEC-090 | Software options and export are not restricted by ESP32 capacity; no deployment-purpose selector. Supersedes the software-history restriction in DEC-088 and DISC-093; fixed firmware RAM remains. | User: 不需要限制。使用者要知道自己的功能選項。 |
+
+| DEC-091 | Execute the desktop JSON export scope now. Leave ESP32 RAM configuration, PP-001 adoption and target memory acceptance decisions to the firmware project. Firmware contracts remain interoperability references, not desktop implementation obligations or capacity gates. | current user request: 執行桌面端 JSON 匯出; annotation 1: 把 ESP32 記憶體配置的決定留給韌體專案。 |
+
+| DEC-092 | Redesign desktop Export Profile around kernel rows with Kernel ID, History/taps, threshold, qualified range and directly accessible JSON export; remove Header Format and Export Headers controls. Preserve the user's alternatives of page-local selection or all-qualified per-row actions; the detailed assistant layout remains a proposal. | User request in task 01a0c356-d77c-7421-935c-72e5a478a492, 2026-09-22: Export profile。要可以選擇kernel。或著是列出所有通過的kernel，在最右邊點選 Export JSON。Header format不需要、Export headers不需要。條列式的kernel，要顯示Kernel ID、History/taps、threshold、qualified range。 |
+
+| DEC-093 | Adopt the presented full-width all-qualified kernel list with per-row Export JSON, four requested metadata columns, no Header Format/Header Preview/Export Headers/Selected Kernels sidebar, fixed headings, scrolling and empty-state guidance. Preserve name/file/overwrite workflow and expose existing JSON eligibility errors per row. | user:01a0c6d2-2051-7b23-b2da-271b6992fb8f:execute-ui — 開始執行, following the presented UI plan. |
+
+| DEC-094 | Limit current requirements, acceptance and execution to desktop JSON export and the adopted kernel-list UI. Supersedes cross-project scope in DEC-091 and earlier firmware deployment requirements for this deliverable. Preserve historical discussion without requiring firmware implementation or evidence. | User explicitly states only software JSON output, excludes firmware import/RAM/device verification and instructs continue execution. Source user:01a0c6e1-3f04-7e23-8fbe-6bbdb153c03d:continue-desktop |
 
 ## Discussion Context
 
@@ -1256,353 +1174,1086 @@ This section summarizes current requirements; Decisions and Discussion Context r
 - **Explicit rationale:** User owns the choice and understanding of functionality.
 - **Resulting impact:** DEC-090 and revised REQ-027/091, AC-027/091 remove software capacity filtering and export gating. Existing qualification checks and FIR-only ESP32 scope remain. Firmware bounds checks remain necessary for fixed storage; no numeric capacity is adopted.
 
+
+### DISC-095: Complete RAM proposal and paired acceptance planning
+
+- **Situation:** User selected the two outstanding planning tasks.
+- **Question:** Complete total RAM accounting, propose acceptance thresholds, synchronize both SPECs and fill acceptance mappings.
+- **Options and tradeoffs:** PP-001 budgets all fixed pools, parser/I/O/control storage, transient heap and existing stack headroom; thresholds are proposed rather than inferred from historical heap snapshots.
+- **User answer:** 先完成這兩個項目 (annotation: 核算完整 RAM 預算，提出驗收門檻。同步兩端 SPEC，補齊驗收對照。).
+- **Explicit rationale:** No additional rationale supplied.
+- **Resulting impact:** Synchronize 96 REQ/AC pairs and shared Technical Contract; correct residual AC-044/054 deployment-family wording. Add PP-001 and a 96-row owner/layer/evidence crosswalk. Decision entries 090 through 104 in the counterpart firmware SPEC-0062 are the source of the already adopted shared history/rate/static-storage/Draft/Orientation/Float32/FIR-only decisions; desktop local decision IDs are independent and not renumbered. PP-001 awaits adoption; no implementation or device test requested or claimed.
+- **Source:** user:01a0c301-5c83-77e0-b598-4b5fcb90fcf1:complete-two-planning-items; firmware SPEC-0062 revision 32 and desktop SPEC-0039 revision 177.
+
+### DISC-096: Authorize desktop JSON export independently of firmware RAM planning
+
+- **Situation:** OD-010 belongs to the firmware RAM design and does not determine desktop serialization or export eligibility.
+- **Question:** Execute desktop JSON export while leaving ESP32 memory configuration to firmware?
+- **Options and tradeoffs:** The user explicitly selects desktop delivery; firmware capacity and device validation remain independently required without blocking desktop export.
+- **User answer:** 執行桌面端 JSON 匯出，
+- **Explicit rationale:** Annotation 1: 把 ESP32 記憶體配置的決定留給韌體專案。
+- **Resulting impact:** DEC-091 scopes current delivery to desktop JSON export, export UI and their tests. Preserve FIR/Ridge-only export, qualification, frozen execution settings, numeric precision, independent display name/filename editing and one model per file. Do not add ESP32 capacity restrictions, warnings or queries. Firmware implementation, RAM proposal adoption, target tests and receiver telemetry changes are outside this execution slice; retained cross-project criteria are not claimed implemented.
+- **Source:** Current user message in task 01a0c356-d77c-7421-935c-72e5a478a492; no host message ID is exposed in the supplied message.
+
+### DISC-097: Recover omitted Export Profile UI requirements and proposal
+
+- **Situation:** The user supplied a screenshot of Export Profile with no selected kernels and requested accessible kernel-level JSON export. The assistant replied with a UI plan without persisting it. The user then asked why SPEC was not updated.
+- **Question:** UI你會如何規劃; 為什麼沒有寫入spec?
+- **Options and tradeoffs:** Page-local selection supports chosen subsets; an all-qualified list with per-row actions makes each available model directly discoverable. Detailed assistant recommendations remain unconfirmed.
+- **User answer:** Kernel selection on Export Profile or a list of all qualified kernels with Export JSON at the right; show Kernel ID, History/taps, threshold, qualified range; remove Header Format and Export Headers. Persisted as REQ-097/098, DEC-092 and AC-097/098.
+- **Assistant proposal, not adopted:** Full-width all-qualified list with count, individual per-row export instead of a batch toolbar; remove Header Preview and Selected Kernels sidebar; retain name/file dialogs; display noncontiguous passing speeds explicitly; retain JSON-ineligible qualified rows with a disabled action and reason; fixed table headings and vertical scrolling; empty-state return to Replay & Qualify. These are recommendations and are not user confirmation.
+- **Explicit rationale:** User wants kernel selection and key model information on the export page. No additional user rationale was supplied.
+- **Resulting impact:** Add REQ-097/098, DEC-092 and AC-097/098; reopen SPEC-0039 in place and save the requested UI change. No product source is changed by this recovery. UI proposal confirmation and execution state are not inferred from the user's question about persistence. Existing JSON semantics and firmware-owned RAM decisions remain unchanged.
+- **Source:** Actual user and assistant messages in current task on 2026-09-22, including screenshot codex-clipboard-ac491188-82f6-4612-a6d6-1171b8474c04.png. Host read_thread returned empty item arrays for recent turns; this is a manual conversation-source reference, not an invented host message ID.
+
+### DISC-098: Execute the presented kernel-list UI
+
+- **Situation:** User asks whether further discussion is needed; the assistant recommends the all-qualified per-row layout and states no functional ambiguity remains.
+- **Question:** Execute the presented UI plan?
+- **Options and tradeoffs:** Adopt the list so export does not depend on a previous-page selection; preserve JSON validation and individually explain unavailable actions.
+- **User answer:** 開始執行
+- **Explicit rationale:** No further rationale supplied.
+- **Resulting impact:** DEC-093 settles the proposed layout, clarifies REQ-097 and AC-097, and authorizes implementation of REQ-097/098 with existing JSON semantics. Header serialization APIs remain available to existing callers. The previous assistant proposal is now adopted through this execution request.
+- **Source:** user:01a0c6d2-2051-7b23-b2da-271b6992fb8f:execute-ui; actual current-turn text 開始執行. Host exposed the turn ID but no message item ID; source is caller-attested.
+
+### DISC-099: Explicit desktop-only scope and continued execution
+
+- **Situation:** The prior materialization gate incorrectly made cross-project acceptance prerequisites for a desktop UI change.
+- **Question:** Which delivery scope should continue?
+- **Options and tradeoffs:** Preserve all historical discussion while narrowing current normative requirements and acceptance to the requested software output; excluded firmware work is neither required nor claimed verified.
+- **User answer:** 只要處理軟體輸出JSON; 這些不需要; 繼續執行.
+- **Explicit rationale:** The user does not need firmware import, ESP32 memory configuration or device verification in this task.
+- **Resulting impact:** DEC-094 narrows active requirements and acceptance to desktop REQ-004/005/022/025/026/027/040/044/045/049/058/097/098. Add machine-readable host semantic and adapter acceptance selectors; retain the current user execution instruction for this same requested UI.
+- **Source:** user:01a0c6e1-3f04-7e23-8fbe-6bbdb153c03d:continue-desktop; actual current annotation and request. Caller-attested turn reference; no invented host message ID.
+
 ## Acceptance Criteria
 
 | ID | Requirements | Criterion | Validation Method | Evidence |
 |---|---|---|---|---|
-| AC-001 | REQ-001 | Confirmed export contract represents the selected models as parameters consumable by the agreed firmware contract. | Paired specification review and later artifact/device conformance fixtures. | Pending |
-| AC-002 | REQ-002 | Each project owns its own specification; counterpart links and shared contract references agree. | Path and cross-contract review. | Pending |
-
-| AC-003 | REQ-003 | A software-exported model file can traverse the confirmed Web import and device validation/apply/save workflow under the finalized shared contract. | Cross-project integration fixtures and bounded device validation. | Pending |
-
-| AC-004 | REQ-004 | Exported artifacts are valid JSON and accepted by the matching firmware JSON schema; persistent model representation follows the independently confirmed JSON decision in REQ-028. | Shared parser/serializer conformance fixtures after schema agreement. | Pending |
-
-| AC-005 | REQ-005 | Each artifact has exactly one model and all required execution settings under the finalized schema; multiple-model export yields independent files. | Cardinality, required-field and independent roundtrip fixtures. | Pending |
-
-| AC-006 | REQ-006 | Two compatible imported models remain selectable without reupload and inference uses only the selected model; Web inventory/deletion follow the finalized lifecycle contract. | Firmware model inventory, persistence and active-selection tests with device evidence. Software verifies independent artifact compatibility. | Pending |
-
-| AC-007 | REQ-007 | Ordinary Web Apply, excluding REQ-016/018 automatic fallback, selects the model without device reboot and ends with collision judgment stopped with physical acquisition resumed under REQ-012; no automatic collision-judgment resume. Publication remains subject to its separate existing control contract. | Activation-state tests and device verification under REQ-043/047. | Pending |
-
-| AC-008 | REQ-008 | All four enable/disable combinations independently admit or suppress new events for the corresponding function while sampling remains available; existing output/reset semantics follow the finalized contract. | Firmware detector-control and integration tests after remaining lifecycle decisions. Software export remains independent of switch state unless later explicitly specified. | Pending |
-
-| AC-009 | REQ-009 | Both boolean controls render and roundtrip independently. Draft changes do not apply until Apply; Save persists applied values, not unapplied edits; reload/reboot reflect the appropriate applied/saved states. | Web configuration tests and firmware persistence/boot tests with migration fixtures once defaults are chosen. | Pending |
-
-| AC-010 | REQ-010 | New/default settings enable both switches; missing-one/missing-both legacy fixtures fill only absent fields as true; saved false and mixed combinations survive Save and reboot. | Default/migration/persistence fixtures and Web checkbox state checks. | Pending |
-
-| AC-011 | REQ-011 | Changing/importing/applying a collision model leaves acceleration-warning on/off and parameters unchanged for both enabled and disabled fixtures; exported model schema excludes warning controls. | Cross-project artifact schema checks and firmware configuration-invariance tests. | Pending |
-
-| AC-012 | REQ-012 | Ordinary model Apply success, excluding REQ-016/018 automatic fallback, resumes acquisition with collision disabled and warning settings unchanged; no collision events occur before explicit user re-enable; checkbox Apply enables eligible judgment only after required readiness; Save remains a separate persistence action. | State-machine/integration tests and bounded device lifecycle verification. | Pending |
-
-| AC-013 | REQ-013 | A declared 1000 Hz model against 2000 Hz effective input is rejected with both rates and correction guidance, leaving running state/model/settings unchanged. Matching-rate fixtures may proceed subject to other gates. Changing publication rate alone cannot create a false mismatch or false match; concurrent configuration changes cannot bypass the rate check. | JSON contract, firmware preflight/concurrency and Web message tests. Rates are illustrative fixtures. | Pending |
-
-| AC-014 | REQ-014 | Web lists original plus imported methods; without imported models the original remains usable; enabling executes only the selected method; disabling suppresses that method; switching follows established gates and does not alter acceleration-warning settings. | Web selector and firmware dispatch/integration tests with original and imported fixtures. | Pending |
-
-| AC-015 | REQ-015 | Three valid imports, including two FIR models at different rates and a distinct same-rate artifact, produce three distinct imported choices plus original; an unloadable artifact contributes no choice; a valid nonmatching-rate entry remains visible but cannot be applied under REQ-013. Enumeration does not delete stored artifacts or infer an active fallback. | Model catalog, Web selector and Apply eligibility fixtures. | Pending |
-
-| AC-016 | REQ-016 | For selected A that cannot load, omit A and automatically apply original method without manual Apply; enabled remains enabled and ready original judgment resumes, disabled remains disabled with no new detections. Verify boot uses saved enable state and applicable defaults, Web exposes failure and applied state, warning settings remain unchanged, and recovery does not implicitly write saved selection. | Boot/reload recovery and selector/configuration integration fixtures for both enable values. | Pending |
-
-| AC-017 | REQ-017 | Disable while collision output is active: output remains until its preexisting expiry, then clears; new triggering samples while disabled neither create collision events nor extend the expiry. Disable while inactive creates no output. Existing event records and independent warning settings remain intact. Exercise manual disable, model Apply and fallback paths. | Deterministic timing/state integration tests and bounded device output verification. | Pending |
-
-| AC-018 | REQ-018 | Delete applied A with collision enabled: original method becomes applied, checkbox stays enabled and ready original judgment resumes without manual Apply. Repeat with collision disabled: it stays disabled and emits no new collision detections. A is removed, Web explains the switch, no deleted-model inference occurs, warning settings remain unchanged. Separately verify load failure still follows REQ-016 and ordinary Apply REQ-012. | Model-management state/integration tests and bounded device switching verification. | Pending |
-
-| AC-019 | REQ-019 | With applied and saved selection A, delete A then reboot without Save: original method is restored and other settings match their prior saved values, including saved collision enable; unapplied Draft and unsaved runtime values are not accidentally persisted. With saved selection B, deletion of applied A preserves B. A successful deletion cannot leave saved selection referencing A; persistence errors cannot be reported as success. | Persistent-state, restart and failure-injection integration fixtures. | Pending |
-
-| AC-020 | REQ-020 | While A is applied, import valid B and verify B is stored and listed, A remains applied, collision/warning enable values and saved configuration are unchanged, and B is not inferred. Reboot confirms B remains stored without requiring device-configuration Save. Repeat with collision enabled/disabled and B requiring a different rate; only subsequent eligible selection/Apply may activate B. | Model import/catalog/persistence integration fixtures and Web state checks. | Pending |
-
-| AC-021 | REQ-021 | Same embedded display name with changed parameters produces a replacement prompt identifying old/new models; cancel and invalid incoming data leave the old artifact intact. Confirmed valid replacement updates one catalog entry without silently creating a duplicate. Runtime activation follows REQ-023 with deferred manual Apply. | Import conflict/validation/storage integration fixtures and Web prompt checks. | Pending |
-
-| AC-022 | REQ-022 | Given FIR at required 1000 Hz with model number k001, default embedded name is FIR_1000Hz_k001 and suggested filename is FIR_1000Hz_k001.json. Repeated exports retain this default rather than adding an export timestamp. Both names are editable; exporting model name Test_A to archive.json retains Test_A in JSON and device display/matching. Renaming archive.json alone does not change Test_A. Shared validation fixtures follow the finalized naming contract. | Export/UI/JSON roundtrip and firmware name-consumption fixtures. | Pending |
-
-| AC-023 | REQ-023 | Run A v1, confirm same-name replacement by valid A v2, then verify storage contains v2 while runtime still uses v1 with unchanged collision/warning settings and Web indicates pending Apply. Successful explicit Apply activates v2 under ordinary activation rules; a rate-mismatch rejection retains v1 and current settings. Cancel/invalid import retains v1 storage under REQ-021. Verify no live snapshot mutation during replacement. | Parameter-identity and inference fixtures, Web version-state checks and concurrent replacement/Apply integration tests. | Pending |
-
-| AC-024 | REQ-024 | With saved selection A and runtime v1, confirm/store v2 without Apply, then restart: validate/load stored v2, reflect it as applied (not still pending), and honor independently saved switch values. Before restart runtime still uses v1. A saved selection of another method is not changed by import. Test invalid/incompatible boot load follows REQ-016; interrupted writes recover a valid committed artifact rather than a partial replacement. Verify no requirement to retain v1 across restart solely for pending activation. | Stored/runtime version identity, reboot/configuration, compatibility and interrupted-write integration fixtures plus bounded device reboot verification. | Pending |
-
-
-| AC-025 | REQ-025 | Only dual_imu_fir is exported for ESP32 and accepted by the first-release firmware; MLP/single-IMU desktop simulation remains available and their deployment artifacts are rejected with clear unsupported-family errors. Verify no target training solver is introduced. | Contract, boundary and target resource checks appropriate to the claim. | Pending implementation; capacity acceptance unresolved. |
-
-| AC-026 | REQ-026 | Float32 and float64 fixtures retain their declared type and corresponding parameter values through JSON export/load; include values that expose silent float64 narrowing. An actual inability to interpret a required type/operation is reported as a load error; no predictive resource/suitability rejection occurs under REQ-027. No automatic conversion is used to pass an unsupported artifact. Verify outputs against agreed cross-platform tolerances separately. | Shared serialization/parser numeric conformance, actual load-error fixtures and target parity evidence. | Pending |
-
-| AC-027 | REQ-027 | Verify software does not filter history or reject qualified FIR JSON export based on ESP32 capacity. Firmware rejects unsupported/oversized artifacts safely; existing qualification, numeric preservation and error rules remain. | UI/export regression and firmware boundary contract checks. | Pending implementation; firmware capacity unresolved. |
-
-| AC-028 | REQ-028 | Import a model and verify its persistent model artifact is JSON with equivalent model content and declared precision. Import alone leaves current inference/settings unchanged. Explicit Apply and boot load the JSON according to their established policies. Corrupt/truncated JSON or actual read/write failures report operation errors and follow existing recovery rules. No separate binary model representation or inherited 1024-byte general-configuration limit is imposed. | Persistent artifact inspection, JSON-to-runtime roundtrip, activation/reboot and error-injection fixtures. | Pending |
-
-| AC-029 | REQ-029 | Verify single-IMU deployment is excluded from first-release ESP32 scope without removing existing desktop simulation. | Scope and regression review. | Pending implementation. |
-
-| AC-030 | REQ-030 | With illustrative JSON baseline 4, effective multipliers 1, 0.5 and 2 yield runtime thresholds 4, 2 and 8 without changing the stored baseline. Verify each control path supplies multiplier semantics under the finalized arbitration and update/persistence rules, does not compound independent inputs, and leaves warning/other model settings unchanged. Web distinguishes baseline, multiplier and effective threshold. Legacy zero sentinel is never accidentally treated as a confirmed zero multiplier. | Arithmetic, control-path and Web-state integration fixtures under REQ-030 through REQ-039; CAN compatibility checks. | Pending |
-
-| AC-031 | REQ-031 | While an imported model is selected, apply Web multiplier 2, then a valid CANopen multiplier 0.5, then an actual knob change mapped to 1: observe effective multipliers in that order with correct threshold products. Unchanged knob scans and unapplied Web Draft do not override them. Exercise simultaneous controls with deterministic commit ordering. Verify original algorithm still follows its existing zero-means-knob rule and imported models require no source-mode selection. | Ordered control-path integration, unchanged-selector polling, Web Draft/Apply and legacy regression fixtures. Values are illustrative within REQ-035. | Pending |
-
-| AC-032 | REQ-032 | With imported A baseline 4 and B baseline 10, shared multiplier 2 yields thresholds 8 on A and 20 on B. Set shared multiplier 0.5 while B is selected, then switch back to A: A uses 2, not a restored per-model multiplier. Verify switching never rewrites JSON baselines or warning/legacy settings, and all three multiplier control paths update the same value. | Cross-model switching, effective-threshold arithmetic and shared-control-state integration fixtures; numbers are illustrative. | Pending |
-
-| AC-033 | REQ-033 | Save multiplier 2 with knob at a position mapping to 0.5; restart and verify 2 remains effective after initial/unchanged knob scans. A later actual knob change updates the multiplier under REQ-031. Change runtime without Save then restart: restore the previous saved value; unapplied Draft is never saved. Repeat with interleaved Web/CANopen operations. | Configuration Save/reboot, initial-selector observation and runtime arbitration integration fixtures; values are illustrative. | Pending |
-
-| AC-034 | REQ-034 | Exhaustively verify all raw selector codes under the 1..15,0 convention produce 16 values from 0.50 to 4.25 in 0.25 increments, with unity at raw 3. Accepted real changes update the shared multiplier and effective threshold; startup and unchanged scans do not. Original collision selector calibration behavior is unchanged. | Full selector mapping fixtures plus actual-change/startup arbitration and original-mode regression checks. | Pending |
-
-| AC-035 | REQ-035 | Accept representative remote multipliers 1.1 and 5 without quantizing to knob values, compute thresholds under the chosen numeric precision and display the applied value. Reject zero, negative, NaN/infinity and unrepresentable settings without altering prior state; arithmetic failure cannot produce a silently invalid effective threshold. Unchanged knob polling preserves remote value; actual knob movement replaces it with its mapped value. | Web/CAN numeric contract, threshold arithmetic and control-arbitration fixtures. | Pending |
-
-| AC-036 | REQ-036 | With original collision method active, 0x2007:00 retains legacy interpretation including zero-means-knob. With an imported model baseline 10, writing valid multiplier 1.5 through that same object yields threshold 15; zero is rejected in model mode. No separate multiplier object is required. Web identifies the active meaning; acceleration warning remains unchanged. | Firmware configuration/adapter contract checks and shared-contract review; target evidence during implementation. | Pending implementation. |
-
-| AC-037 | REQ-037 | New or migrated configuration with no saved multiplier starts at 1.0 and uses the JSON baseline unchanged; initial unchanged knob observations do not replace it. A saved multiplier such as 1.5 is restored instead of defaulted. Original algorithm defaults remain unchanged. | Configuration default/migration and model-threshold calculation checks during implementation. | Pending implementation. |
-
-| AC-038 | REQ-038 | After using imported-model multiplier 1.5, select the original method and apply setting 2. Switching to an imported model retains 2 and computes baseline times 2, rather than restoring 1.5. Switching back retains the current shared number under legacy interpretation, subject to destination validity. Save/reboot restore the saved selection and common value; no selection change alone Saves. Cover the legacy-zero transition under REQ-039 and reject invalid direct model-mode numeric writes. | Shared-setting selection/persistence integration scenarios during implementation. | Pending implementation. |
-
-| AC-039 | REQ-039 | Start with original algorithm and shared setting 0. On a successful switch to an imported model, show setting 1.0 and an adjustment notice, compute the unchanged JSON baseline, and follow normal Apply enable/persistence rules. A failed preflight preserves the original setting/selection; direct model-mode zero writes remain rejected. Positive retained values remain unchanged under REQ-038. | Model-switch transaction, Web notice, preflight-failure and numeric-validation scenarios during implementation. | Pending implementation. |
-
-| AC-040 | REQ-040 | For each supported family, a qualified frozen model can export structurally valid JSON. A model with complete parameters but failed or missing qualification cannot export and receives a clear explanation. Qualification from a different parameter/numeric/preprocessing/detector snapshot cannot authorize export. Device resource suitability remains a user decision and is not added as an export admission gate. | Per-family exporter admission fixtures and frozen qualification-identity checks during implementation. | Pending implementation. |
-
-| AC-041 | REQ-041 | Import valid Model_A and model_a artifacts and observe two retained models and two selector options, with original spelling preserved. Import changed content using exact name Model_A and observe replacement confirmation affecting only that entry; filename changes alone do not alter identity. | Export-name roundtrip, firmware catalog identity and Web selector/replacement fixtures during implementation. | Pending implementation. |
-
-| AC-042 | REQ-042 | Verify single-IMU deployment is excluded from first-release ESP32 scope without removing existing desktop simulation. | Scope and regression review. | Pending implementation. |
-
-| AC-043 | REQ-043 | While disabled and samples arrive, model filter/history/predictor/score invocation counters do not advance and no new collision event occurs; independently enabled acquisition/telemetry/warning continue. Re-enable and verify old transient state is discarded, fresh warmup/history requirements complete before the first judgment, and Web reflects readiness. already_filtered mode refills history without an invented filter warmup. An existing alarm expires on its original schedule. | Disabled-path invocation/state assertions, re-enable readiness vectors, Web integration and bounded target execution evidence during implementation. | Pending implementation. |
-
-| AC-044 | REQ-044 | For FIR, MLP and single-IMU Ridge export and parse all required version-1 fields; malformed shapes, missing execution settings, unexpected versions and swapped input/lag conventions fail explicitly without mutation. Repeated export of the same frozen snapshot retains its execution identity. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-| AC-045 | REQ-045 | Exercise float32/float64 extrema and representative coefficients, signed zero, SOS precision and non-finite rejection; parameter bits round-trip exactly. Unicode names retain exact spelling and case; model names are never interpreted as filesystem paths. Numeric setting REAL32 conversion is consistent across Web/CAN and does not narrow model coefficients. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-| AC-046 | REQ-046 | Inject interrupted writes before/after commit and actual write/allocation failures. Reboot recovers an old or fully committed new artifact, never a partial file. Pending replacement leaves the active snapshot intact. Delete a saved-selected model and verify the saved reference is repaired without saving unrelated runtime values. Same-name/same-content import is a no-op; same-name/different-content requires confirmation. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-| AC-047 | REQ-047 | Verify rate rejection before quiescence; successful ordinary Apply resumes sampling with collision processing disabled; re-enable waits for fresh readiness. Verify load-failure/deletion fallback preserve enable state and original readiness, shared warning state remains correct and no retired snapshot is processed. TCP publication does not silently restart where explicit START is required. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-| AC-048 | REQ-048 | Fresh/legacy config selects the original method. Applied selection and field survive Save/boot; unapplied Draft and unsaved runtime do not. JSON import cannot set switches/multiplier/selection. Web and CAN numeric controls read/write one setting with current-method meaning. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-| AC-049 | REQ-049 | Execute independent known-answer traces including startup, gaps, threshold equality, confirmation/release, disabled/re-enabled and non-unit multipliers; compare predictions, scores, states and event sample identities. Record any analytically justified arithmetic bounds before target runs. Every required acceptance layer has current SPEC/build/profile-bound evidence; no stale PASS, host-only target claim or unmeasured target-performance assertion is accepted. | Paired artifact/host/target checks as assigned under REQ-049; specification review before implementation. | Pending implementation. |
-
-| AC-050 | REQ-050 | Device Configuration contains model import/catalog/selection/replacement/deletion and operational settings. No separate Collision Models page exists. Import/replacement does not implicitly select, Apply or Save; deletion/fallback behavior is preserved. | Single-page Web interaction integration checks during implementation. | Pending implementation. |
-
-| AC-051 | REQ-051 | In configuration Draft, select an imported model and verify original-only mode/envelope fields disappear while the common setting and independent switches remain visible. Select the original method again and verify the original-only values reappear unchanged. Neither selection nor hiding alone changes applied/saved configuration; cancellation/reload follows the existing Draft behavior. Apply uses only settings relevant to its selected method. | Configuration UI visibility, Draft isolation and value-preservation integration fixtures during implementation. | Pending implementation. |
-
-| AC-052 | REQ-052 | Select multiple qualified models and export through successive per-model dialogs. Each dialog identifies its model, offers editable embedded name and filename, and can use a different directory. Resulting files each contain exactly one correct model with the chosen embedded name, regardless of filename/location. Existing naming, qualification and file-conflict rules remain enforced. | Desktop export-dialog workflow and artifact-content integration fixtures during implementation. | Pending implementation. |
-
-| AC-053 | REQ-053 | Device Configuration displays imported/selected/applied model summaries with unambiguous identity/status; successful import displays its summary without automatic Apply or Save. No separate management page or full coefficient viewer is introduced. | Web summary-state and scope checks during implementation. | Pending implementation. |
-
-| AC-054 | REQ-054 | Each selected original/FIR/MLP/single-IMU algorithm executes exclusively through the callback entry with its applicable preprocessing and judgment. Switching parameters does not execute other algorithms; disabled collision does not run its private preprocessing/inference. Warning control remains independent. Artifact loading and alarm output occur outside the algorithm callback, and inputs preserve required source/pairing semantics. | Dispatch/lifecycle contract tests and per-family golden-vector integration checks during implementation. | Pending implementation. |
-
-| AC-055 | REQ-055 | Original and imported algorithms return the same small structured status/error result. Warm-up/history shortage and ordinary no-trigger return NoCollision/None; qualifying trigger returns Collision/None; numeric failure returns Error with the matching non-None code. Verify outer caller disables collision and emits the incident log only on Error, without a separate error query or notification callback. Preserve alarm hold and independent warning. Check the actual target result layout without assuming size from enum underlying types. | Callback contract, status/code invariant and lifecycle tests during implementation. | Pending implementation. |
-
-| AC-056 | REQ-056 | Verify one common collision dispatch site for original and all imported families. With only the required single source available, original/single-source processing continues without waiting for the unused source. Dual-source algorithms return NoCollision with no error until suitable input is available. No parallel legacy pre-pair collision path remains, and the structured callback result and independent warning controls are preserved. | Source-flow review and dispatch/input-availability integration tests during implementation. | Pending implementation. |
-
-| AC-057 | REQ-057 | Switching same-family models changes loaded parameters and initializes clean state while sharing algorithm code. Reset/re-enable retains parameters without JSON reload and restarts applicable warm-up/history. Execute does not read JSON/Flash or serve as initialize/reset command. Disabled collision performs no collision-specific execution. | Lifecycle contract tests with file-access observation and alternating-model reference vectors during implementation. | Pending implementation. |
-
-| AC-058 | REQ-058 | With readiness satisfied and detector eligible to trigger, one score above threshold triggers without extra confirming samples; equal/below threshold does not trigger. Updating multiplier retains filter/history/runtime state without warm-up and affects the next eligible evaluation. Validate export/reference parity for single-sample semantics and preserve release/re-arm/active alarm hold behavior. | Threshold-boundary, state-continuity and export/reference integration tests during implementation. | Pending implementation. |
-
-| AC-059 | REQ-059 | Exercise each control source and an update during collision processing. Verify the in-flight computation uses its original complete snapshot, the next computation sees the accepted new setting, and arbitration/persistence rules remain unchanged. Original and imported algorithms interpret the same common field according to the selected method; callbacks do not read control adapters. | Configuration-boundary and controlled-interleaving integration tests during implementation. | Pending implementation. |
-
-| AC-060 | REQ-060 | Architecture ownership and interface review identify one private owner for each algorithm runtime object. External orchestration and control adapters cannot directly read/write filter/history/warm-up internals. Switching/reset behavior follows REQ-057 through public lifecycle operations. | Boundary/state-ownership review plus lifecycle contract tests during implementation. | Pending implementation. |
-
-| AC-061 | REQ-061 | All selected algorithm families execute through complete, correctly paired operation/instance bindings; process returns the REQ-055 result and callers cannot dereference algorithm-private runtime. Switching waits for in-flight execution before replacing/releasing the old binding and respects existing Apply/fallback contracts. | Interface ownership review and dispatch/binding lifecycle tests during implementation. | Pending implementation. |
-
-| AC-062 | REQ-062 | After a completed switch, no inactive model parsed-parameter/runtime cache remains; the stored catalog and JSON artifacts remain available. Switching back reads/parses the relevant stored artifact. Disable/re-enable of the same retained model keeps its no-reload semantics. Account for transient parsing and switch allocations separately before claiming target-memory acceptance. | Lifecycle/allocation ownership tests and bounded device memory evidence during implementation. | Pending implementation. |
-
-| AC-063 | REQ-063 | Verify preflight preserves the active model on rejection, in-flight calls finish before fixed storage is overwritten, no second model or per-switch model-sized allocation occurs, and post-overwrite failure falls back with prior enable preserved. | Contract, boundary and target resource checks appropriate to the claim. | Pending implementation; capacity acceptance unresolved. |
-
-| AC-064 | REQ-064 | Verify streaming load across arbitrary read boundaries and JSON member order, preserving structural validation and exact numeric round-trip. Preflight does not allocate a second resident model and loading does not retain full JSON text/tree plus parameter arrays. Multiple passes use the same committed artifact version. Failure frees partial allocations and follows fallback; bound/account scratch separately from model runtime. | Parser conformance/failure/allocation-lifetime tests and target peak-memory evidence during implementation. | Pending implementation. |
-
-| AC-065 | REQ-065 | Verify reset retains parameters, destroy invalidates the binding without freeing the fixed reservation, switch safely reuses it and partial loads cannot be called. | Contract, boundary and target resource checks appropriate to the claim. | Pending implementation; capacity acceptance unresolved. |
-
-| AC-066 | REQ-066 | Import while sensing is active/inactive and independently enabled/disabled collision/warning. Confirm no new sampling/judgment during the pause, unchanged applied model and enable settings, transactional storage and prior-state restoration on success and injected terminal failures. Restored processing starts fresh continuity/warm-up; imports never implicitly Apply or Save, nor restart TCP contrary to explicit START rules. Web reports the pause and operation outcome. | Import/quiescence/error-recovery integration tests and bounded device evidence during implementation. | Pending implementation. |
-
-| AC-067 | REQ-067 | The Device Configuration import area shows the interruption/restoration explanation and named action. File selection alone causes no upload/quiescence. Pressing the action starts the flow without a separate pause modal; same-name/different-content replacement still requires confirmation. Operation status reports pause and completion/failure without implying model activation. | Web interaction/state tests during implementation. | Pending implementation. |
-
-| AC-068 | REQ-068 | Web has no separate Collision Models page/route. Device Configuration offers model import and displays the successfully imported artifact summary there without navigation, implicit selection, Apply or Save. Preserve existing model controls, pending Draft/applied identity distinction, inline pause notice, replacement confirmation and no full coefficient viewer. | Single-page Web interaction and state-preservation integration tests during implementation. | Pending implementation. |
-
-| AC-069 | REQ-069 | With A applied, import B and show B in the preview alongside unchanged applied A. Selecting C updates that same preview to C without a third area or applying C. Successful Apply updates the actual applied summary; preflight rejection leaves it unchanged and accepted fallback reflects the actual original algorithm. Imported preview and any unchanged Draft identity are unambiguous. No full coefficients or separate management page are added. | Web preview/Draft/applied-state integration tests during implementation. | Pending implementation. |
-
-| AC-070 | REQ-070 | Import UI has no manual cancel control. Normal completion and injected terminal upload/write/validation failures report the correct outcome and restore prior acquisition/function state with cleanup under REQ-066. Declining same-name replacement remains possible and preserves the old artifact; committed imports are not rolled back as cancellations. | Web operation-state and import failure-recovery integration tests during implementation. | Pending implementation. |
-
-| AC-071 | REQ-071 | Opening Device Configuration exposes the model section without an expand action, with same-page import/selection and exactly two summary areas. Original-only controls follow selected method; Draft/Apply/Save and no-cancel behavior remain unchanged. | Web layout/visibility and interaction integration checks during implementation. | Pending implementation. |
-
-| AC-072 | REQ-072 | Architecture/source ownership identifies collision as the owner of all original/imported algorithm implementations, separated into implementation files sharing the callback contract. No private state is exposed to control or storage adapters; only the selected model retains runtime under prior memory rules. Independent warning and single invocation behavior remain intact. | Architecture boundary/type/state ownership review and dispatch/lifecycle tests during implementation. | Pending implementation. |
-
-| AC-073 | REQ-073 | Architecture identifies separate model-storage and device-configuration storage responsibilities/interfaces. Import/replacement/deletion affect the intended model artifacts without implicit configuration Save; configuration Save does not rewrite model parameter artifacts. Shared Flash coordination prevents conflicting storage operations without added model caches/tasks being inferred. | Storage boundary/transaction integration tests and architecture ownership review during implementation. | Pending implementation. |
-
-| AC-074 | REQ-074 | Reconstruct the same eligible catalog after reboot from committed JSON artifacts without a persistent index file. Enumeration uses bounded parsing and no inactive inference parameter arrays. Import/replacement/deletion refresh entries; incomplete staging files are not listed and case-sensitive identity/loadability rules remain intact. | Catalog reconstruction/transaction failure and allocation-observation tests during implementation. | Pending implementation. |
-
-| AC-075 | REQ-075 | With imported model applied, original coefficients remain visible, collection and calibration apply controls and backend mutations are unavailable; changing only draft selection does not unlock them. Applying original algorithm restores calibration operations and preserves stored coefficients. Model threshold and IMU zero-offset behavior remain independent. | UI and API state-transition checks plus original calibration regression. | Pending |
-
-| AC-076 | REQ-076 | During active calibration sample collection, model switch Apply is rejected with actionable finish/cancel guidance before any current-runtime or acquisition mutation; samples, applied model and flags remain intact. After finishing or cancelling calibration, a new explicit Apply can proceed through existing checks. Direct backend calls cannot bypass the rule. | Calibration/model-switch interleaving and UI/API regression checks. | Pending |
-
-| AC-077 | REQ-077 | From a second client, submit model Apply and deletion while import is active. Both reject immediately with import-busy guidance, do not affect the import or applied state, and never execute automatically after either import success or failure. An explicit retry after import termination is admitted only through normal checks. | Multi-client operation-admission and terminal-path integration checks. | Pending |
-
-| AC-078 | REQ-078 | Inject non-finite imported-model computation with valid input. Verify no collision from that evaluation, collision enable becomes false, model selection remains unchanged, private collision processing stops, error is visible, and no automatic fallback or retry occurs. Shared IMU and acceleration warning remain independent and prior alarm hold semantics remain unchanged. Normal warmup/history shortage does not trigger this fault. Explicit recovery follows ordinary Apply/enable rules. | Numeric-fault injection and runtime/UI state-transition regression. | Pending |
-
-| AC-079 | REQ-079 | Verify a fault log identifies the applied model, numeric-failure reason and disabled action, without coefficient dumps. Subsequent IMU samples while collision is fault-disabled do not repeat the same log. After explicit recovery, another injected fault creates a new incident log. | Existing diagnostic sink capture with fault-transition and repeated-sample fixtures. | Pending |
-
-| AC-080 | REQ-080 | Verify model-storage parent is device_management_application and configuration remains a separate sibling. Device Management maps their interactions without shared mutable ownership; firmware_system coordinates cross-L1 Flash and Sensor operations. Confirm no direct L1 sibling coupling, collision-private state access, additional Task or partition is implied by parenting. | Architecture boundary/type/state/dependency mapping review and single architecture CLI gates during implementation. | Pending |
-
-| AC-081 | REQ-081 | Verify separate storage and parameter-validation/loading responsibilities, shared format checks for import/Apply, exact adopted coefficient precision and no activation on import. Confirm bounded streaming populates final parameter storage without duplicate full model/text/tree allocation; algorithms own parameters/private state and per-sample processing performs no storage access. | Architecture ownership/interface review plus streaming loader/import/Apply and allocation-lifetime checks during implementation. | Pending |
-
-| AC-082 | REQ-082 | Architecture places the independent loader under sensor_pipeline_application alongside collision and model storage under device_management_application. Verify parent-owned parameter delivery and cleanup with no direct sibling dependency/private state access. Import validation neither activates a model nor builds another full runtime. Apply retains existing preflight/quiescence/retire-before-overwrite in fixed storage/fallback behavior across firmware_system-coordinated parents. | Boundary/type/state/dependency review and import/Apply lifecycle integration checks during implementation. | Pending |
-
-| AC-083 | REQ-083 | Verify bounded direct fills into collision-owned fixed storage, no duplicate parameter arrays, rejection of incomplete/out-of-bounds data and safe invalidation/fallback on fill/finalization failure. | Ownership, bounded-parser and lifecycle contract tests. | Pending implementation. |
-
-| AC-084 | REQ-084 | In imported-model mode verify 536 reports the selected model score and 540 the effective baseline-times-multiplier threshold; 537-539 and 541-545 explicitly report not applicable. Check names/units/availability switch only with applied mode, preserve original 536-545 meanings after switching back, and reject stale original/model projections. Verify supported subscriptions still output their signals, no extra legacy inference is run, and disabled collision remains computationally stopped. Compare threshold output with committed control updates and actual detector semantics. | Register projection/subscription integration, mode-transition and disabled-path regression checks; transport representation review before implementation. | Pending |
-
-| AC-085 | REQ-085 | Verify 536/540 descriptors and payloads remain Float32/four bytes for both model precisions and original-mode compatibility. Use Float64 near-threshold values that round to equal Float32 outputs to verify detection still uses full internal precision. Exercise finite internal values outside Float32 range: affected output reports invalid with no clamping, stale/zero substitution, or projection-induced collision disable; other valid outputs continue. Internal NaN/infinity still follows REQ-078/079. | Numeric conversion, register encoding and detector/projection separation fixtures with subscription integration checks. | Pending |
-
-| AC-086 | REQ-086 | Mixed binary subscriptions retain valid samples and fixed layout when a collision float is unavailable, not ready or output-range invalid; only that field carries the designated quiet NaN. Consumer recognizes missing output without interpreting zero/collision or dropping other valid fields. Inject actual model arithmetic NaN: process returns Error, one fault log and collision disable occur, independent signals continue, and telemetry sentinel never re-enters detector arithmetic. JSON serialization does not emit NaN literals. | Binary encoder/decoder interoperability, mixed-validity packet and numeric-fault separation tests. | Pending |
-
-| AC-087 | REQ-087 | Evaluate score 0.8 using threshold 0.6, then commit threshold 1.2 before publication: output the coherent 0.8/0.6 evaluation pair, never 0.8/1.2. On the next valid evaluation, publish its new score and threshold 1.2 together. Exercise concurrent publication/update, model switch/reset invalidation, individual field subscription, Float32 rounding/range handling and immediate settings display without mixing snapshot generations. | Deterministic interleaving and register-projection integration tests. | Pending |
-
-| AC-088 | REQ-088 | At a lower configured output rate, feed an interval with an intermediate score peak and a lower final-frame score; emit the final-frame projection, not the peak or average, with its matching threshold. Verify the intermediate eligible peak can still trigger collision independently of telemetry. Invalid final-frame collision output uses the missing-value marker without substituting an earlier valid frame. Preserve existing output-window sizing/reset and other signal behavior. | Existing reducer regression plus model projection/downsample and independent detector integration fixtures. | Pending |
-
-| AC-089 | REQ-089 | Verify source/manifest implementation matches the integrated parent, boundary, type/state ownership and flow tables. Collision supplies a coherent bounded snapshot, Sensor Pipeline maps it to publication, and subscription adds no second inference/model/history allocation. Establish required complete pre-code manifest, exact declarations/mappings, schema compatibility and AST evidence through the single architecture CLI, followed by applicable runtime/interoperability validation. | Architecture design/development/release gates and affected integration/runtime verification matrix. | Pending implementation. |
-
-
-| AC-090 | REQ-090 | Inspect fixed reservation ownership/layout and measured total bytes, prove switches reuse it and no inactive model cache exists. Account separately for bounded transient allocations; exact size awaits OD-010. | Cross-project contract review, layout checks and bounded device evidence. | Pending; OD-010 unresolved. |
-| AC-091 | REQ-091 | Verify existing software history choices remain available without a new target-purpose selector or RAM admission gate. Verify firmware exact-boundary and over-capacity handling once Nmax is decided. | UI/export regression and firmware boundary contract checks. | Pending implementation; firmware capacity unresolved. |
-| AC-092 | REQ-092 | Collect build-bound target evidence for the selected fixed capacity under combined model/Web/transport operation and loading transitions. Compare heap minima/largest blocks, allocation failures and stack margins with agreed criteria; historical free heap alone cannot pass acceptance. | Cross-project contract review, layout checks and bounded device evidence. | Pending; OD-010 unresolved. |
+| AC-004 | REQ-004 | Verify: Desktop export produces a strict UTF-8 JSON artifact for one qualified model. Firmware import and runtime are not deliverables of this specification. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-005 | REQ-005 | Verify: Each JSON file contains exactly one frozen model and its complete execution settings. Exporting different kernels produces independent files. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-022 | REQ-022 | Verify: Allow independent editing of model name and filename. Default name is model type, required sampling rate and stable kernel number, such as FIR_1000Hz_k001, without a timestamp. Suggest name plus .json; changing filename does not change embedded name. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-025 | REQ-025 | Verify: JSON export supports qualified dual-IMU FIR/Ridge only. Preserve existing desktop training and simulation for other families; explain unsupported JSON export without silently changing model family. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-026 | REQ-026 | Verify: Preserve the declared Float32 or Float64 model precision, exact selected-type numeric values including signed zero, array shapes and ordering. Never narrow precision for export. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-027 | REQ-027 | Verify: Desktop export adds no ESP32 RAM, taps, rate or capacity gate, warning or capability query. Keep qualification and JSON semantic validation. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-040 | REQ-040 | Verify: Export only current qualified profiles with the same frozen parameters, preprocessing, detector settings and numeric precision. Recheck current availability when preparing and saving; reject stale, failed, incomplete and invalid results. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-044 | REQ-044 | Verify: Export a complete frozen execution snapshot including format/version, name, family, numeric type, required rate, input identities, model coefficients, preprocessing, residual, detector and provenance. Do not rerun training or Qualification during export. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-045 | REQ-045 | Verify: Validate finite numbers, dimensions, rates, positive scales and thresholds, Unicode model names and local JSON filenames. Internal/External XYZ units are user-confirmed g, without conversion. Preserve provenance identity independently of display name and filename. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-049 | REQ-049 | Verify: Restore exported arrays and settings on the desktop and verify reference prediction and strict threshold behavior in the declared numeric precision. This is desktop roundtrip evidence, with no firmware or device parity claim. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-058 | REQ-058 | Verify: Preserve frozen single-sample 1_OF_1 detector semantics, threshold, release ratio and quiet time. Do not silently rewrite multi-sample confirmation. Show a reason for an otherwise qualified row that cannot be exported as JSON. | Desktop JSON/controller regression fixtures and reference roundtrip checks | Pending current UI revision verification |
+| AC-097 | REQ-097 | Verify: Export Profile lists all qualified kernels independently of previous-page selection. Each row shows Kernel ID, History/taps, threshold and qualified range, with Export JSON at the far right. Use actual passing speeds when available without inventing continuous coverage. Keep fixed headings, a scrolling body, per-row eligibility reasons and empty-state guidance to Replay & Qualify. Each action opens the existing name and save dialogs for that row alone. | QML interaction, controller tests and visual inspection | Pending current UI revision verification |
+| AC-098 | REQ-098 | Verify: Remove Header Format, Header Preview, Export Headers and Selected Kernels sidebar from Export Profile. Preserve existing header serialization APIs for other callers. Keep JSON filename validation, explicit overwrite confirmation, atomic commit and failure cleanup; show actionable save errors. | QML interaction, controller tests and visual inspection | Pending current UI revision verification |
+
+| AC-001 | REQ-001 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-002 | REQ-002 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-003 | REQ-003 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-006 | REQ-006 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-007 | REQ-007 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-008 | REQ-008 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-009 | REQ-009 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-010 | REQ-010 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-011 | REQ-011 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-012 | REQ-012 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-013 | REQ-013 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-014 | REQ-014 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-015 | REQ-015 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-016 | REQ-016 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-017 | REQ-017 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-018 | REQ-018 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-019 | REQ-019 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-020 | REQ-020 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-021 | REQ-021 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-023 | REQ-023 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-024 | REQ-024 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-028 | REQ-028 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-029 | REQ-029 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-030 | REQ-030 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-031 | REQ-031 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-032 | REQ-032 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-033 | REQ-033 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-034 | REQ-034 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-035 | REQ-035 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-036 | REQ-036 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-037 | REQ-037 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-038 | REQ-038 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-039 | REQ-039 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-041 | REQ-041 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-042 | REQ-042 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-043 | REQ-043 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-046 | REQ-046 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-047 | REQ-047 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-048 | REQ-048 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-050 | REQ-050 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-051 | REQ-051 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-052 | REQ-052 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-053 | REQ-053 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-054 | REQ-054 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-055 | REQ-055 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-056 | REQ-056 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-057 | REQ-057 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-059 | REQ-059 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-060 | REQ-060 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-061 | REQ-061 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-062 | REQ-062 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-063 | REQ-063 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-064 | REQ-064 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-065 | REQ-065 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-066 | REQ-066 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-067 | REQ-067 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-068 | REQ-068 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-069 | REQ-069 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-070 | REQ-070 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-071 | REQ-071 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-072 | REQ-072 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-073 | REQ-073 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-074 | REQ-074 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-075 | REQ-075 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-076 | REQ-076 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-077 | REQ-077 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-078 | REQ-078 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-079 | REQ-079 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-080 | REQ-080 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-081 | REQ-081 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-082 | REQ-082 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-083 | REQ-083 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-084 | REQ-084 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-085 | REQ-085 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-086 | REQ-086 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-087 | REQ-087 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-088 | REQ-088 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-089 | REQ-089 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-090 | REQ-090 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-091 | REQ-091 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-092 | REQ-092 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-093 | REQ-093 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-094 | REQ-094 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-095 | REQ-095 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+| AC-096 | REQ-096 | Verify the desktop change adds no implementation or device-validation dependency for this retired cross-project obligation; no firmware behavior is claimed. | Desktop scope and change review | Pending scope review |
+
+## Acceptance Mapping
+
+```json
+{
+  "AC-004": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Desktop export produces a strict UTF-8 JSON artifact for one qualified model. Firmware import and runtime are not deliverables of this specification.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-005": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Each JSON file contains exactly one frozen model and its complete execution settings. Exporting different kernels produces independent files.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-022": {
+    "evidence_claims": [
+      "host-semantics",
+      "adapter-conformance"
+    ],
+    "rationale": "Desktop-only Allow independent editing of model name and filename. Default name is model type, required sampling rate and stable kernel number, such as FIR_1000Hz_k001, without a timestamp. Suggest name plus .json; changing filename does not change embedded name.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-025": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only JSON export supports qualified dual-IMU FIR/Ridge only. Preserve existing desktop training and simulation for other families; explain unsupported JSON export without silently changing model family.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-026": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Preserve the declared Float32 or Float64 model precision, exact selected-type numeric values including signed zero, array shapes and ordering. Never narrow precision for export.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-027": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Desktop export adds no ESP32 RAM, taps, rate or capacity gate, warning or capability query. Keep qualification and JSON semantic validation.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-040": {
+    "evidence_claims": [
+      "host-semantics",
+      "adapter-conformance"
+    ],
+    "rationale": "Desktop-only Export only current qualified profiles with the same frozen parameters, preprocessing, detector settings and numeric precision. Recheck current availability when preparing and saving; reject stale, failed, incomplete and invalid results.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-044": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Export a complete frozen execution snapshot including format/version, name, family, numeric type, required rate, input identities, model coefficients, preprocessing, residual, detector and provenance. Do not rerun training or Qualification during export.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-045": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Validate finite numbers, dimensions, rates, positive scales and thresholds, Unicode model names and local JSON filenames. Internal/External XYZ units are user-confirmed g, without conversion. Preserve provenance identity independently of display name and filename.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-049": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Restore exported arrays and settings on the desktop and verify reference prediction and strict threshold behavior in the declared numeric precision. This is desktop roundtrip evidence, with no firmware or device parity claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-058": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Desktop-only Preserve frozen single-sample 1_OF_1 detector semantics, threshold, release ratio and quiet time. Do not silently rewrite multi-sample confirmation. Show a reason for an otherwise qualified row that cannot be exported as JSON.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-097": {
+    "evidence_claims": [
+      "host-semantics",
+      "adapter-conformance"
+    ],
+    "rationale": "Desktop-only Export Profile lists all qualified kernels independently of previous-page selection. Each row shows Kernel ID, History/taps, threshold and qualified range, with Export JSON at the far right. Use actual passing speeds when available without inventing continuous coverage. Keep fixed headings, a scrolling body, per-row eligibility reasons and empty-state guidance to Replay & Qualify. Each action opens the existing name and save dialogs for that row alone.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-098": {
+    "evidence_claims": [
+      "host-semantics",
+      "adapter-conformance"
+    ],
+    "rationale": "Desktop-only Remove Header Format, Header Preview, Export Headers and Selected Kernels sidebar from Export Profile. Preserve existing header serialization APIs for other callers. Keep JSON filename validation, explicit overwrite confirmation, atomic commit and failure cleanup; show actionable save errors.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-001": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-002": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-003": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-006": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-007": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-008": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-009": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-010": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-011": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-012": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-013": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-014": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-015": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-016": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-017": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-018": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-019": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-020": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-021": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-023": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-024": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-028": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-029": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-030": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-031": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-032": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-033": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-034": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-035": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-036": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-037": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-038": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-039": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-041": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-042": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-043": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-046": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-047": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-048": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-050": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-051": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-052": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-053": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-054": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-055": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-056": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-057": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-059": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-060": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-061": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-062": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-063": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-064": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-065": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-066": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-067": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-068": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-069": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-070": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-071": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-072": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-073": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-074": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-075": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-076": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-077": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-078": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-079": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-080": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-081": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-082": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-083": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-084": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-085": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-086": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-087": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-088": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-089": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-090": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-091": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-092": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-093": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-094": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-095": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  },
+  "AC-096": {
+    "evidence_claims": [
+      "host-semantics"
+    ],
+    "rationale": "Explicitly retired cross-project obligation: inspect desktop change scope only; no target behavior or physical evidence claim.",
+    "contract_dimensions": [],
+    "execution_changes": [],
+    "scenario_layers": {}
+  }
+}
+```
 
 ## Technical Contract
 
-This section supplies implementation detail derived from the accepted requirements and existing frozen-model contracts. It is not a new product implementation or a device-validation result.
-
-### Ownership and scope
-
-- Desktop owns selecting qualified frozen models, editable model/filename inputs, the JSON encoder and reference vectors. Keep existing header export behavior available; the new JSON path covers the dual-IMU FIR/Ridge.
-- env_sensing owns JSON import/storage/catalog, Web controls, selected-model execution, shared setting arbitration, error recovery and device evidence. No retraining or filter redesign occurs on ESP32.
-- Both project SPECs carry the same artifact semantics. Existing source contracts supply algorithm meaning; historical deployment deferrals in SPEC-0025/0030 are refined by this change set, not silently edited.
-
-### JSON version 1
-
-The top-level object uses these required fields; no executable serialization is permitted:
-
-| Field | Meaning |
-|---|---|
-| format | Literal collision-model-parameters. |
-| schema_version | Integer 1, distinct from general device-configuration schema. |
-| model_name | Nonempty Unicode display name; exact case-sensitive decoded text is catalog identity. |
-| model_family | dual_imu_fir only in this release. |
-| numeric_type | float32 or float64, from the qualified frozen model. |
-| required_sample_rate_hz | Finite positive effective model-input rate. |
-| input | Explicit sensor roles, XYZ order and physical units, axis/calibration assumptions, feature order and lag convention from the qualified input contract. |
-| model | FIR tap count and frozen weights [3][3][N] and biases [3]. |
-| preprocessing | Source mode, adopted ordered filters/SOS and their numeric precision, warmup sample count and reset/initial-state convention; explicit bypass when none applies. |
-| residual | Three centers, three valid scales, scale_method, robust_k and score_mode from qualification. |
-| detector | baseline_threshold, single-sample confirmation_mode under REQ-058, comparison score>threshold, release_ratio and release_quiet_time_s. Export qualification and frozen reference semantics must match the single-sample trigger rule; preserve applicable frozen release settings. |
-| provenance | Stable model/kernel identity and qualified execution-snapshot identity; retain applicable run/fold, condition coverage, numeric and software-version evidence without exporting raw training recordings. |
-
-Required execution fields may not be missing or null. Unknown or internally contradictory interpretation is an explicit parse/contract error, not a guessed fallback interpretation. Reject duplicate JSON keys and non-finite execution numbers. Optional descriptive provenance may extend without changing execution; new execution semantics require a new supported schema interpretation.
-
-Device switches, shared numeric setting/multiplier, selected method, current knob position and runtime filter/history state are not model-file parameters. Import does not overwrite those settings. Filenames are transport labels only. A model's execution identity is determined from normalized execution content and its numeric values, not filename, whitespace or key order; active/stored versions must be distinguishable. Equal decoded model name and equal normalized content is an idempotent import without a duplicate entry.
-
-### Family and numerical interpretation
-
-- Dual FIR/Ridge retains weights [output XYZ][input XYZ][tap], biases [3], current-sample-through-past tap order and existing Internal-input/External-target roles. Use the existing input-axis/lag accumulation order; do not transpose weights or substitute the original collision envelope algorithm.
-- Parameter JSON must restore the exact selected-type finite values (including signed zero). Emit sufficient decimal precision for round-trip, at least the equivalent of 9 significant digits for binary32 and 17 for binary64 where needed; never parse all parameters through a float32 intermediate. Preserve SOS at its adopted precision even when model arithmetic is float32.
-- Inference uses the existing frozen desktop reference semantics and reduction order. FIR uses non-FMA selected-type multiply/add; preserve residual normalization, score, strict threshold comparison, single-sample triggering under REQ-058 and release timing. Qualification/reference semantics must match that single-sample rule. Default release_ratio 0.5 and quiet time 0.050 seconds apply only where they are the actual frozen values, not as missing-field substitution.
-- The common device numeric field retains REAL32 to match 0x2007:00 and existing configuration storage. Web displays the committed representable value. Promote that setting to the model's declared arithmetic type as needed for baseline times multiplier; this must not narrow float64 model parameters. Reject invalid/overflowed effective thresholds with explicit failure, not an invalid live comparison.
-- Parameter round-trip is exact. Target inference parity is not assumed merely from type preservation: compare against independent reference traces and the existing reference implementation. Any non-bit-identical arithmetic requires a bound derived from operation order/count and rounding before testing; do not tune tolerance to hide indexing, preprocessing or decision differences. Trigger sample identities, confirmation/release states and readiness must agree for the acceptance vectors, including threshold-boundary cases.
-
-### Names and files
-
-Preserve Unicode name spelling exactly, including letter case; do not lowercase or silently merge names. Reject an empty/all-whitespace name and embedded control characters. Treat names as text, not paths or HTML. Store models under internal storage identifiers so different case-sensitive names remain independent even on a case-insensitive filesystem. Desktop filenames use the normal save dialog and .json extension; report platform-invalid filenames and existing-file conflicts without silently changing the embedded model name or overwriting another export. Do not impose the general 1024-byte setting envelope as a model-file limit.
-
-### Storage and activation transitions
-
-- Import: use coordinated temporary IMU quiescence and prior-state restoration under REQ-066; decode/validate candidate, resolve same-name replacement confirmation if needed, write a temporary JSON artifact, ensure complete durable content and atomically commit its catalog association. Until commitment the old model/catalog is authoritative. On recovery ignore incomplete staging data; never advertise it. This does not mandate a permanent old model version after successful replacement.
-- Running versus stored: retain the immutable running snapshot until Apply or reboot even after replacement. List stored identity and currently running identity separately when different. A failed storage operation leaves the prior committed artifact and running snapshot usable.
-- Apply: snapshot the candidate selection/settings and actual input configuration, complete structural/input-rate preflight, then use existing coordinated quiescence. Prevent concurrent import/config/knob/CAN operations from committing a stale mixed configuration. After all in-flight callbacks finish, retire the old binding and invalidate old model state and overwrite the shared fixed storage for the new model under REQ-063; commit only a fully initialized coherent selection/configuration, then resume acquisition. Ordinary model Apply disables collision processing; explicit later enable starts fresh readiness under REQ-043. Do not run old and new collision methods simultaneously.
-- Recovery: rate/preflight mismatch preserves the old running state. Actual selected-model load failure hides that entry and applies the original algorithm with the previous enable state. An enabled recovered detector waits until its own valid initial state is ready. If even original initialization cannot run, report an explicit not-ready/error state and do not claim judgment is operating. Persist no implicit fallback selection except deletion-driven reference repair.
-- Deletion: remove the requested model transactionally, switch to original if it was active, and replace any saved reference to that deleted model with original before reporting success. Repair only that reference, leaving unrelated saved values unchanged. A failed deletion reports failure and retains a recoverable consistent catalog/configuration.
-- Sampling gaps, invalid model input and reinitialization invalidate affected history/confirmation state. Never bridge a true discontinuity with stale model history. While disabled, there is no collision-specific filter/history/inference work; enabled warnings and telemetry retain required shared processing.
-- The new UI shows disabled, warming/not-ready, ready and operation-error states, the selected model/rate, and baseline/current multiplier/effective threshold for imported models. It does not promise current model qualification at a user-adjusted non-unit multiplier. Existing alarm-output expiry remains independent of starting a new detection.
-
-### Verification and implementation boundary
-
-Use desktop reference/export checks, host firmware contract/storage-failure scenarios, and target evidence for actual numeric/runtime behavior. Bind each acceptance criterion to the project's verification matrix and applicable scenario before implementation acceptance. The desktop project currently lacks validation/verification-ladder.yaml; this is a verification-planning prerequisite, not a reason to discard requirements or to claim target evidence. Do not run hardware or change product/architecture artifacts during this SPEC-only task. Architecture, type/state ownership, C/C++ AST coverage and required gates remain implementation prerequisites under each project's AGENTS.md.
-
-### Source basis for consolidation
-
-- Desktop domain/profile_export/model.py and service.py: SemanticProfile, qualified-only validation, precision, detector export and FIR arithmetic.
-- Desktop domain/learning/model.py, service.py and mlp.py: frozen families, selected-type FIR accumulation, fixed MLP prediction, DetectorConfig and release/confirmation semantics.
-- Desktop domain/learning/self_imu.py and preprocessing.py; SPEC-0030: strict-past history, selected sensor, stored SOS, warmup and already-filtered bypass.
-- env_sensing modules/configuration/device_configuration.cpp: finite nonnegative legacy common field, with zero as legacy knob selector; CANopen generated dictionary 0x2007:00 REAL32 and its runtime adapter.
-- env_sensing sensor_pipeline_application.cpp and SPEC-0048: coordinated acquisition/configuration lifecycle and independently controlled TCP publication; general configuration A/B storage has its own 1024-byte wrapper.
+The existing desktop JSON version-1 contract remains unchanged: one frozen qualified dual-IMU FIR/Ridge per file, selected numeric precision, current-to-past lag order and explicit input/output axes, as-recorded calibration assumptions, preprocessing, residual, strict score > threshold detector and provenance. The desktop owns name/file dialogs and atomic UTF-8 writing. The controller owns current-result lookup and eligibility, independent of prior row selection. Firmware support policies and defaults are not inferred.
 
 ## Relationships
 
-- supersedes: DEC-046, DEC-049 (page-separation clause only), by DEC-064; retain summary-only scope.
-
-- refines: SPEC-0001, SPEC-0025, SPEC-0030
-- depends_on: SPEC-0062 at C:/Users/hugo_peng/firmware/periphery/env_sensing/specs/SPEC-0062-model-parameter-loading.md (shared artifact/interface compatibility; each project owns its implementation).
-
-- supersedes: DEC-051 and bool-return clause of DEC-053 by DEC-076; current callback returns structured status/error.
-- supersedes: DEC-074 runtime numeric-fault fallback by DEC-075; runtime errors disable collision and log, while load failures retain original fallback policy.
-- refines: REQ-084 through REQ-088 define model signal mapping, fixed Float32 output, binary missing-value marker, coherent pairing and existing downsample selection.
-
+Current desktop obligations are REQ/AC-004,005,022,025,026,027,040,044,045,049,058,097,098. DEC-094 supersedes earlier cross-project delivery scope; retained DEC/DISC history records earlier discussion and is not current acceptance scope.
 
 ## Out of Scope
 
-- Product implementation and firmware flashing during discussion.
-- Automatic adoption of historical env_sensing FIR training contracts over current software contracts.
-
-
-- First-release ESP32 deployment of MLP or single-IMU Ridge; removal of their existing desktop simulation features; on-device Ridge training.
+Firmware JSON import, Web configuration, Apply/Save, ESP32 memory/storage/timing design, telemetry and physical-device verification. No removal of existing desktop learning or header serializer APIs. No new JSON schema version.
 
 ## Integrated Architecture Contract
 
-Status: user-confirmed logical design under DEC-086, derived from accepted REQ-054 through REQ-089. This is a specification design appendix, not an edited architecture manifest or a passed architecture gate. Current manifests/adoption/baselines were inspected; both use schema 2.2.0 and empty baselines. Listed ADRs remain proposed, not accepted. Preserve schema 2.1.0 compatibility and generate description views only from the manifest during authorized implementation.
+Preserve existing module owners and dependencies: StudioController in studio_application maps frozen profile_export-owned SemanticProfile to desktop_adapter QML rows and JSON file operations. No new module, named type, thread or state owner; existing dialog state is reused. Update architecture manifest descriptions and render generated views through architecture_cli.
 
-### End-to-end flow and scope
+## RAM Budget Proposal — PP-001
 
-- Desktop: studio_application maps qualified immutable learning artifacts into profile_export input; profile_export validates/serializes through its demand-owned file boundary. One model/export dialog and one JSON artifact retain the selected names and precision. No direct learning/profile-export sibling dependency.
-- Import: explicit Web import enters firmware_system; Device Management admits the operation, Sensor Pipeline quiesces acquisition and preserves prior flags, Data Services grants coordinated Flash access. Storage stages JSON; the loader performs bounded validation-only scanning against a stable artifact. Storage commits only on success. Every terminal path cleans temporary operation resources and restores prior acquisition/settings under the existing import rules; import does not activate a model. Prior runtime histories reset where continuity was broken.
-- Apply: non-mutating structural/rate preflight first. Rejection preserves the applied runtime. After successful admission/quiescence and in-flight completion, Sensor Pipeline retires/retires old binding. Collision prepares inactive algorithm-owned final parameter storage; loader fills through parent mapping; completion validation and initialization precede activation. Failure cleans partial resources and follows existing load-failure original fallback. Ordinary successful model Apply leaves collision disabled. Save remains separate.
-- Execute: prepared input reaches one common collision call site; only the selected implementation processes eligible input. Original and model families share ProcessResult status/error. Acceleration warning remains independent. A normal result may update the algorithm-owned model signal snapshot; an actual numeric Error stops collision, retains model selection and emits one incident via outer coordination. No Web, Flash or logging I/O inside the algorithm callback.
-- Publish: Sensor Pipeline copies a coherent model signal snapshot into the existing publication frame through its parent mapping. Existing last-frame downsample selects frames; register projection maps 536/540 with fixed Float32 external encoding and uses explicit availability to generate the designated binary quiet-NaN marker. No second inference, peak accumulator or full history buffer is introduced. Receiving software treats markers as missing fields while preserving other valid data.
+Excluded from this desktop-only specification by explicit user instruction. Earlier proposal discussion is retained in history; no RAM budget is required or adopted by this delivery.
 
-### Boundary Design Table
+## Acceptance Crosswalk
 
-| Interaction | Producer | Consumer | Parent | Producer contract | Consumer contract | Mapping owner | State accessed | Allowed edges | Forbidden edges |
-|---|---|---|---|---|---|---|---|---|---|
-| Qualified artifact export | learning_qualification | profile_export | studio_application | immutable qualified artifact | export-owned parameter document input | studio_application | frozen qualified values; export operation | parent to each child; owned file port to adapter | direct sibling import; mutable training state shared with exporter |
-| Import/Apply request | Web adapter | firmware_system | release composition | decoded command | flow-specific admitted operation | firmware_system | operation ticket and request identity | adapter to bound L0 flow entry | adapter orchestrating multiple L1 calls |
-| Stable artifact read | model_storage through Device Management | model loader through Sensor Pipeline | firmware_system | scoped artifact read/version | loader-owned semantic read boundary | firmware_system | committed/staged artifact identity and bounded cursor | parent-mediated cross-L1 access | Sensor Pipeline depending directly on Device Management; exposing LittleFS handles |
-| Validate-only document | loader codec adapter | parameter loader | Sensor Pipeline | bounded parsed field/numeric chunks | loader-owned semantic input | Sensor Pipeline composition mapping | parse scratch; schema/dimension counters | adapter implements demand-owned contract | JSON-library types in public L0-L2 contracts |
-| Prepare/fill/finalize fixed parameter slots | parameter loader | collision algorithm lifecycle | Sensor Pipeline | validated layout/chunk/completion | algorithm-owned prepare/fill/finalize contract | Sensor Pipeline | inactive instance; final owned parameter arrays | parent-mapped bounded borrowed chunks | direct sibling calls; loader dereferencing private arrays; duplicate full model allocation |
-| Processing and fault | selected collision implementation | Sensor Pipeline | Sensor Pipeline | ProcessResult and coherent telemetry query | caller-owned detector/fault policy | Sensor Pipeline; firmware_system maps device state/log handoff | selected binding; fault generation | query/call through owned contracts after process returns | logging/Flash in algorithm; concurrent destroy; treating missing wire sentinel as arithmetic input |
-| Model telemetry | collision | signal_processing/publication | Sensor Pipeline | immutable ModelSignalSnapshot copy | frame-owned semantic projection | Sensor Pipeline | latest valid evaluation and explicit availability | parent mapping to publication frame | direct collision to transport dependency; unrelated control snapshot mixed with score |
-| Storage transaction and saved reference | model_storage | configuration | Device Management | committed/deleted artifact outcome | configuration-owned selected reference repair | Device Management | artifact/catalog; saved selection only | parent coordinates children under L0 admission | sibling direct mutation; incidental Save of unrelated applied/draft settings |
-| Flash use | requesting L0 flow | Data Services | firmware_system | requested bounded access | existing lease admission/release | firmware_system | Flash leases | existing demand-owned storage adapters after admission | Flash lease mistaken for IMU quiescence; undeclared persistent index |
-
-### Affected Type Ownership Matrix
-
-Names below are proposed semantic names; exact declarations/source paths must be cataloged and validated before source edits. Existing project types keep their current owners. This table scopes the change, not an assertion that whole-repository AST coverage has passed.
-
-| Contract/type | Owner and level | Fields/role and referenced project types | Visibility and consumers | Lifetime/mutation authority | ABI/wire/storage impact |
-|---|---|---|---|---|---|
-| ProcessResult; DetectionStatus; ErrorCode | collision L2 | status enum plus error enum; no score/string/heap | public to Sensor Pipeline | returned value per invocation; algorithm constructs | internal callback ABI changes from bool; no direct wire/JSON layout |
-| AlgorithmOperations; opaque instance binding | collision L2 | initialize/reset/process/destroy plus checked preparation/fill completion contract; references ProcessResult | public contract, opaque private instance | active or inactive instance lifetime; Sensor parent controls binding; collision owns the fixed reservation | internal function-table changes only; no persisted pointers |
-| AlgorithmParameterPlan / fill input | collision L2 | family-required dimensions, numeric precision and bounded typed field segment | parent-facing demand contract | borrowed call input; only algorithm mutates its destination | no exposed private memory layout; not JSON representation |
-| ParameterValidationResult / load description | parameter_loader L2 | validated family/rate/shape/precision, semantic failure reason; numeric segment descriptor | parent-facing, mapped to collision-owned input by Sensor Pipeline | load/validation operation; loader owns counters | model schema interpreted without changing wire format; no full model DTO copy |
-| ModelArtifactRef / ModelCatalogEntry | model_storage L2 | internal artifact identity, version and summary; never user name as path | Device Management input/output values | committed artifact identity; model_storage mutation | separate persistent JSON files; no persistent catalog index |
-| ModelSignalSnapshot | collision L2 | paired score/effective-threshold in native numeric precision, semantic availability and model/runtime generation identity | immutable query copy to Sensor Pipeline | owner-private latest snapshot; collision alone writes; reset invalidates | internal type; parent maps to frame, then fixed Float32 536/540; no additions to ProcessResult |
-| Model projection within ProcessedFrame | signal_processing L2 | bounded semantic numeric/availability fields copied from one evaluation | existing publication consumers | immutable published frame under existing lifetime | internal frame layout must be assessed; external packet slots retained |
-| Device setting / diagnostics snapshots | existing configuration/device diagnostic owners | selected artifact reference, collision/warning flags, shared setting, fault reason/revision | parent-mediated Web/CAN/control consumers | existing single authorities and Apply/Save semantics | device configuration migration/default rules; generated CAN type remains REAL32 |
-| JSON/file/transport adapter-private types | owning L3 adapter | parser, filesystem handles, binary encoder state | private to technology boundary | scoped adapter lifecycle | wire/storage handled here; no framework types leak into L0-L2 |
-
-### State Object Ownership Matrix
-
-| State | Sole owner / mutation authority | Lifetime and cleanup | Readers/transfer and synchronization |
-|---|---|---|---|
-| Selected algorithm coefficients, filter/history/warmup and detector state | selected collision implementation | algorithm instance; reset retains parameters; destroy frees all; partial create cleanup explicit | opaque handle only outside owner; parent waits for in-flight calls before retirement |
-| Inactive parameter construction state | selected algorithm implementation | after old release through successful finalize or failed cleanup | bounded fills through parent mapping; never callable as active before completion |
-| Operation binding/generation | Sensor Pipeline | current runtime selection | publication/fault projections carry identity so retired results cannot attach to a new model; no replacement during process |
-| Latest paired model telemetry | collision | selected runtime generation; invalidated by reset/switch/invalidating fault | coherent immutable query copy via parent; no raw private-state pointer and no sample history |
-| Loader parse cursor, validation counters and bounded scratch | loader/codec each own private state | one validation/load operation; terminal cleanup | callback/chunk borrowing lasts only through call; never retained after input reuse |
-| Staging file, commit/replacement/delete state and catalog metadata | model_storage; storage adapter owns physical handles | scoped transaction; prior committed artifact recoverable | Device Management coordinates catalog/config; stable read identity spans preflight/load |
-| Draft/applied/saved settings | existing configuration authority; Web owns only local Draft | existing Apply/Save/boot lifecycle | no loader writes settings; parent maps requested changes |
-| Fault incident handoff/log request | Sensor Pipeline fault origin; device diagnostics/log infrastructure owns destination record | one error transition; no per-sample repeated log | outer coordinated handoff, no logging inside process; stale runtime incidents cannot disable a new instance |
-| Admission tickets and Flash leases | existing OperationCoordinator / Data Services respectively | accepted operation through every terminal release | firmware_system coordinates acquisition and resource lifetimes; no waiting-command queue |
-| Publication frames and transport buffers | existing signal_processing/transport owners | existing immutable frame and bounded transport lifetimes | consumers copy/encode independently; no additional model task or shared mutable model cache |
-
-No new file-scope/static/thread-local shared model state or extern mutable arrays are proposed. Existing mutable globals must remain inventoried by their current owners; source-level inventory and AST coverage are implementation gates, not inferred from this table.
-
-### Actual and Intended Dependency Edges / Parent Mappings
-
-- Actual software: studio_application coordinates learning_qualification and profile_export; both are L1 siblings. Intended: retain this parent mapping for export and preserve desktop adapters as technology boundaries.
-- Actual firmware: firmware_system coordinates Device Management, Sensor Pipeline, Data Services and Web application. Device Management owns configuration, calibration and operation admission. Sensor Pipeline owns collision, acquisition/pairing and signal processing. Data Services coordinates Flash leases.
-- Intended additions: Device Management owns model_storage L2; Sensor Pipeline owns parameter_loader L2 and maps loader/collision contracts. No direct model_storage-to-loader, loader-to-collision or L1-sibling dependency. L0 owns artifact-read and operation ordering across parents.
-- Source placement candidates: src/modules/model_storage; src/modules/model_loading; algorithm family files under existing src/modules/collision. JSON/Flash bindings remain L3 adapters; release composition wires demand-owned interfaces. These are intended paths, not created files or exemptions from manifest validation.
-- Subscriber score projection reads one evaluation snapshot after processing; it does not expand the selected ProcessResult or add a second inference callback. Demand-owned query and value-copy mapping preserve collision-private state.
-
-### Review and Verification Boundary
-
-This confirmed logical mapping preserves accepted behaviors; it does not certify schedulability, RAM sufficiency, whole-repository architecture conformance or implementation completion. Before product source edits, materialize a complete planned manifest, exact named-type/field/state/source catalog and mappings, run the single architecture CLI design gate, and complete required workload/flow-cost and scheduling analysis. Retain current execution allocation as existing evidence, not an unmeasured performance approval. C/C++ requires pinned libclang/full compilation coverage and later AST gates. Desktop/target interoperability, invalid-field decoding, memory/Flash failure paths and runtime evidence remain pending acceptance work. No ADR is accepted by this review and no generated Architecture Description View is hand-edited.
+The active desktop acceptance IDs match their same-numbered requirement IDs. Existing desktop JSON regression tests cover serialization and file safety; new QML/controller cases cover page-local discoverability, exact row identity, metadata, empty states and eligibility. Prior 96-item cross-project planning is superseded for this scope; no target evidence is claimed.
 
 ## Open Decisions
 
-- OD-010: Fixed FIR/Ridge RAM budget and layout (including numeric/preprocessing states and transient allowance), maximum taps, reservation placement (static or once at startup), and quantitative target memory/stack acceptance margins are not yet decided. 65 taps is an unaccepted candidate, not a default.
+None.
 
 ## Routing/Gates
 
-SPEC-only consolidation. Product implementation remains unauthorized. Required architecture, formatter, verification-ladder, TDD and review gates apply before implementation/acceptance. The missing desktop verification matrix must be supplied through governed implementation planning; no AC runtime PASS is asserted here.
+User explicitly instructs continue execution of desktop JSON export and the presented kernel-list UI. Verify the active desktop SPEC, formatting, architecture design/development gates and desktop regressions. Firmware checks are out of scope, not substituted by desktop evidence.
 
 ## Question Record
 
@@ -1813,6 +2464,8 @@ SPEC-only consolidation. Product implementation remains unauthorized. Required a
 
 | Next | 2026-09-17 | User accepts integrated design; close logical design questions, consolidate current rules and prepare both canonical specifications. |
 | 174 | 2026-09-21 | Reopened before clarification: User requests synchronization: FIR/Ridge-only ESP32 deployment, reusable fixed-capacity RAM, supported history choices; capacity unresolved; restore separate firmware contract under non-conflicting identity. |
+| 181 | 2026-09-21 | Reopened before clarification: Bind the user-selected desktop JSON delivery continuation to the current task; preserve DEC-091 and all requirements. |
+| 182 | 2026-09-22 | Reopened before clarification: User requests Export Profile kernel rows, required metadata and per-row JSON export; remove Header Format and Export Headers. Recover previously omitted UI discussion without treating assistant suggestions as adopted requirements. |
 
 ## Current Specification
 
@@ -1824,16 +2477,22 @@ See Decisions, Discussion Context and the sourced Discussion History below.
 
 ## Pending Discussion
 
-- OD-010: Fixed FIR/Ridge RAM budget and layout (including numeric/preprocessing states and transient allowance), maximum taps, reservation placement (static or once at startup), and quantitative target memory/stack acceptance margins are not yet decided. 65 taps is an unaccepted candidate, not a default.
+None.
 
 ## Completeness Gaps
 
-- confirmed and implemented specs must have zero open decisions
+None.
 
 <!-- spec-audit:start -->
 ## Discussion History
 
 - user-spec-review-20260921: 我想確認軟體spec跟韌體的spec；唯讀核對目前文件與最近FIR-only固定RAM決策差異
+- 01a0c35a-f51b-72a3-9394-ff212f3939a7: 執行桌面端 JSON 匯出，
+- 01a0c35a-f51b-72a3-9394-ff212f3939a7: User desktop-only execution scope was reconciled in DEC-091 and DISC-096, with firmware RAM decisions remaining in firmware. SPEC confirmed and continuation bound to current task. No product changes. Managed execution admission is still being diagnosed; local venv resolves yaml dependency, but runtime verification matrix is missing.
+- 01a0c364-7ddb-7cb1-8309-6737802bf033: 開始執行 SPEC-0039
+- 01a0c364-7ddb-7cb1-8309-6737802bf033: User explicitly requests 開始執行 SPEC-0039 for the unchanged confirmed desktop JSON export scope. No new requirements. Proceed through current-scope validation preparation and implementation.
+- user:01a0c6d2-2051-7b23-b2da-271b6992fb8f:execute-ui: 開始執行
+- user:01a0c6e1-3f04-7e23-8fbe-6bbdb153c03d:continue-desktop: 只要處理軟體輸出JSON；韌體匯入、ESP32記憶體配置及裝置驗證這些不需要。繼續執行
 
 ### Source and Revision Audit
 
@@ -2019,5 +2678,22 @@ See Decisions, Discussion Context and the sourced Discussion History below.
 {"affected_ids":["AC-025","AC-027","AC-063","AC-065","AC-082","AC-083","AC-090","AC-091","AC-092","DEC-087","DEC-088","DEC-089","DISC-093","REQ-025","REQ-027","REQ-040","REQ-049","REQ-056","REQ-062","REQ-063","REQ-065","REQ-081","REQ-082","REQ-090","REQ-091","REQ-092"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-025","AC-027","AC-063","AC-065","AC-082","AC-083"],"added_ids":["AC-090","AC-091","AC-092","DEC-087","DEC-088","DEC-089","DISC-093","REQ-090","REQ-091","REQ-092"],"changed_ids":["AC-025","AC-027","AC-063","AC-065","AC-082","AC-083","REQ-025","REQ-027","REQ-040","REQ-049","REQ-056","REQ-062","REQ-063","REQ-065","REQ-081","REQ-082"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"d50e196dccfe92eaecc9dc360b21fd9ae18e608d0479e42287e025c092ded02b","event_type":"reconcile","event_version":1,"open_decisions":["OD-010: Fixed FIR/Ridge RAM budget and layout (including numeric/preprocessing states and transient allowance), maximum taps, per-rate history options, capacity delivery/versioning to the software, reservation placement (static or once at startup), and quantitative target memory/stack acceptance margins are not yet decided. 65 taps is an unaccepted candidate, not a default."],"previous_event_hash":"0da6ce170a9e8157d1075b3c6f6bc05196ca31dcd8a17d7d5e6530cd9dfdd211","previous_snapshot_hash":"95bde3e7ad6993a15bbd257726e612f80abdb5e65e625d14d4e91914bf31994a","recorded_at":"2026-09-21T08:03:26.766620+00:00","relationships":[],"revision":175,"snapshot_hash":"ad6ca818d7f99a39e257810aecaf41dc5b634948752562c53aa704582812f2e0","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
 {"affected_ids":["AC-029","AC-042","AC-083","REQ-029","REQ-042","REQ-064","REQ-083"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-029","AC-042","AC-083"],"added_ids":[],"changed_ids":["AC-029","AC-042","AC-083","REQ-029","REQ-042","REQ-064","REQ-083"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"e24accf4fac3232cda97425345345f190cca0713e700fc430933540d31fab91d","event_type":"reconcile","event_version":1,"open_decisions":["OD-010: Fixed FIR/Ridge RAM budget and layout (including numeric/preprocessing states and transient allowance), maximum taps, per-rate history options, capacity delivery/versioning to the software, reservation placement (static or once at startup), and quantitative target memory/stack acceptance margins are not yet decided. 65 taps is an unaccepted candidate, not a default."],"previous_event_hash":"d50e196dccfe92eaecc9dc360b21fd9ae18e608d0479e42287e025c092ded02b","previous_snapshot_hash":"ad6ca818d7f99a39e257810aecaf41dc5b634948752562c53aa704582812f2e0","recorded_at":"2026-09-21T08:06:12.973685+00:00","relationships":[],"revision":176,"snapshot_hash":"bf7c2ae2c9d6dfbba729c7fb7cb733c0e3cb8f12869226b5624349475765a4d6","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
 {"affected_ids":["AC-027","AC-091","DEC-090","DISC-094","REQ-027","REQ-091"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-027","AC-091"],"added_ids":["DEC-090","DISC-094"],"changed_ids":["AC-027","AC-091","REQ-027","REQ-091"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"91e01c834f9303429d047bc390a7c01a8e0f6a13a56f592d4f63f4842fb8a3f5","event_type":"reconcile","event_version":1,"open_decisions":["OD-010: Fixed FIR/Ridge RAM budget and layout (including numeric/preprocessing states and transient allowance), maximum taps, reservation placement (static or once at startup), and quantitative target memory/stack acceptance margins are not yet decided. 65 taps is an unaccepted candidate, not a default."],"previous_event_hash":"e24accf4fac3232cda97425345345f190cca0713e700fc430933540d31fab91d","previous_snapshot_hash":"bf7c2ae2c9d6dfbba729c7fb7cb733c0e3cb8f12869226b5624349475765a4d6","recorded_at":"2026-09-21T09:18:02.395675+00:00","relationships":[],"revision":177,"snapshot_hash":"df119098f313a2bf2c8b62ef550fb8937e48e74664394061b092a25d2c10aa9b","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":["AC-013","AC-026","AC-027","AC-043","AC-044","AC-045","AC-054","AC-085","AC-090","AC-091","AC-092","AC-093","AC-094","AC-095","AC-096","DISC-095","REQ-002","REQ-013","REQ-026","REQ-027","REQ-028","REQ-043","REQ-045","REQ-049","REQ-064","REQ-085","REQ-090","REQ-091","REQ-092","REQ-093","REQ-094","REQ-095","REQ-096"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-013","AC-026","AC-027","AC-043","AC-044","AC-045","AC-054","AC-085","AC-090","AC-091","AC-092"],"added_ids":["AC-093","AC-094","AC-095","AC-096","DISC-095","REQ-093","REQ-094","REQ-095","REQ-096"],"changed_ids":["AC-013","AC-026","AC-027","AC-043","AC-044","AC-045","AC-054","AC-085","AC-090","AC-091","AC-092","REQ-002","REQ-013","REQ-026","REQ-027","REQ-028","REQ-043","REQ-045","REQ-049","REQ-064","REQ-085","REQ-090","REQ-091","REQ-092"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"4939449a97df6663c391429f114401b53ec45e764381f42a8618386d3246993b","event_type":"reconcile","event_version":1,"open_decisions":["OD-010: Review/adopt or revise the completed PP-001 RAM envelopes and quantitative acceptance thresholds. Arithmetic, scope and the 96-row acceptance plan are now documented; whole-device feasibility still requires implementation and matched target measurements. PP-001 is a proposal, not an adopted limit or a measured PASS."],"previous_event_hash":"91e01c834f9303429d047bc390a7c01a8e0f6a13a56f592d4f63f4842fb8a3f5","previous_snapshot_hash":"df119098f313a2bf2c8b62ef550fb8937e48e74664394061b092a25d2c10aa9b","recorded_at":"2026-09-21T09:45:14.784141+00:00","relationships":[],"revision":178,"snapshot_hash":"b38dc779112431a2ff3fcbe80149af5c451d5911c92968af3e16e773d1d31099","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":["DEC-091","DISC-096"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":[],"added_ids":["DEC-091","DISC-096"],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"5828c43dc0c5f5ec6590e765bae8363585cbff4ace8de642cdd4d199144524e5","event_type":"reconcile","event_version":1,"open_decisions":["None for the desktop JSON export delivery slice. OD-010 (PP-001 RAM envelopes and target memory/stack acceptance thresholds) is deferred to the firmware project by DEC-091; no proposal is adopted and no target feasibility is claimed."],"previous_event_hash":"4939449a97df6663c391429f114401b53ec45e764381f42a8618386d3246993b","previous_snapshot_hash":"b38dc779112431a2ff3fcbe80149af5c451d5911c92968af3e16e773d1d31099","recorded_at":"2026-09-21T09:48:39.653379+00:00","relationships":[],"revision":179,"snapshot_hash":"ace2e31d168a2cefe963d30ebacfc53e098b626f4b44c5b3ccd4261fe1440fc9","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":[],"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"27c15e322afbf432318e98119969503e3d274263a495e5146cbe9f46308379c9","event_type":"reconcile","event_version":1,"open_decisions":[],"previous_event_hash":"5828c43dc0c5f5ec6590e765bae8363585cbff4ace8de642cdd4d199144524e5","previous_snapshot_hash":"ace2e31d168a2cefe963d30ebacfc53e098b626f4b44c5b3ccd4261fe1440fc9","recorded_at":"2026-09-21T09:49:08.957703+00:00","relationships":[],"revision":180,"snapshot_hash":"1b44778c67aca862dd446aabac7d365af0fd126655d2c195dda79cef51f68fbd","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"13d91dd5adef55c386b4a5e6c826b407a423a71cf04d158edcd24d37a2a1e152","event_type":"materialize","event_version":1,"open_decisions":[],"previous_event_hash":"27c15e322afbf432318e98119969503e3d274263a495e5146cbe9f46308379c9","previous_snapshot_hash":"1b44778c67aca862dd446aabac7d365af0fd126655d2c195dda79cef51f68fbd","recorded_at":"2026-09-21T09:49:20.832598+00:00","relationships":[],"revision":180,"snapshot_hash":"df27392178eac6df53609b461cedbde9a32ad68a3c402932dfe1de21f2df6b97","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"baseline_contract_hash":"fd05c30e23052d6ba0ecec9d94544ad214b095dddc822a13a488b0406afa001f","conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"0b90bad412455d56fccec2e179ee26e4b634118f744e7a19986fb1d351dbe382","event_type":"reopen","event_version":1,"open_decisions":[],"previous_event_hash":"13d91dd5adef55c386b4a5e6c826b407a423a71cf04d158edcd24d37a2a1e152","previous_snapshot_hash":"df27392178eac6df53609b461cedbde9a32ad68a3c402932dfe1de21f2df6b97","recorded_at":"2026-09-21T09:50:50.370101+00:00","relationships":[],"revision":181,"snapshot_hash":"d8feedd149798f8aef7844b13b63b78968a01d03899d50b2931bc13ccaa41eb3","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"a764af4002d0a800ad3cc4c79ae2d1d5a093c2566ec4c8acdf7c2ab589f6ab43","event_type":"materialize","event_version":1,"open_decisions":[],"previous_event_hash":"0b90bad412455d56fccec2e179ee26e4b634118f744e7a19986fb1d351dbe382","previous_snapshot_hash":"d8feedd149798f8aef7844b13b63b78968a01d03899d50b2931bc13ccaa41eb3","recorded_at":"2026-09-21T09:51:02.876165+00:00","relationships":[],"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"goal":"執行桌面端 JSON 匯出，","historical_entry_evidence":"not-inferred","kind":"entry","source_ref":"01a0c35a-f51b-72a3-9394-ff212f3939a7","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c35a-f485-70c3-989d-6f7eeb78fd31"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"5ad419dc59d15acf897a743779efd5b268d6927ac6671537127e08eeda7998b4","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"a764af4002d0a800ad3cc4c79ae2d1d5a093c2566ec4c8acdf7c2ab589f6ab43","previous_snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","recorded_at":"2026-09-21T09:51:21.046995+00:00","relationships":[],"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"binding":{"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"},"candidates":[],"completeness_review":null,"identified_items":{},"item_bindings":{},"kind":"saved","reply_sha256":"5a2c8baf1277baa126e83c16abfd8ea1cd62f39626a8b3d0205360ace1008288","reply_stage":"prepared-until-host-stop","reviewed_sources":["01a0c35a-f51b-72a3-9394-ff212f3939a7"],"source_ref":"01a0c35a-f51b-72a3-9394-ff212f3939a7","summary":"User desktop-only execution scope was reconciled in DEC-091 and DISC-096, with firmware RAM decisions remaining in firmware. SPEC confirmed and continuation bound to current task. No product changes. Managed execution admission is still being diagnosed; local venv resolves yaml dependency, but runtime verification matrix is missing.","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c35a-f485-70c3-989d-6f7eeb78fd31"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"2aa41baf429fe8c03bf819ff018bf0ad4742e95d8b83a1da2cab18c45e766f7f","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"5ad419dc59d15acf897a743779efd5b268d6927ac6671537127e08eeda7998b4","previous_snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","recorded_at":"2026-09-21T09:52:31.003574+00:00","relationships":[],"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"goal":"開始執行 SPEC-0039","historical_entry_evidence":"not-inferred","kind":"entry","source_ref":"01a0c364-7ddb-7cb1-8309-6737802bf033","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c364-7d5b-72a1-af47-9274f5f7d7a6"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"b5a53cd62056682177368c300907598d1420ab1c67e4915ca2443241ab9beab2","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"2aa41baf429fe8c03bf819ff018bf0ad4742e95d8b83a1da2cab18c45e766f7f","previous_snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","recorded_at":"2026-09-21T09:56:14.941692+00:00","relationships":[],"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"binding":{"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"},"candidates":[],"completeness_review":null,"identified_items":{},"item_bindings":{},"kind":"saved","reply_sha256":"2491f0a335240c51c255e6713c11033d4f88652e2168415a9ba076cb535071b1","reply_stage":"prepared-until-host-stop","reviewed_sources":["01a0c364-7ddb-7cb1-8309-6737802bf033"],"source_ref":"01a0c364-7ddb-7cb1-8309-6737802bf033","summary":"User explicitly requests 開始執行 SPEC-0039 for the unchanged confirmed desktop JSON export scope. No new requirements. Proceed through current-scope validation preparation and implementation.","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c364-7d5b-72a1-af47-9274f5f7d7a6"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"dc6da10e8d05167d208d5a435a3a40738825ca1d04bb60f6590a9fd52e610a79","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"b5a53cd62056682177368c300907598d1420ab1c67e4915ca2443241ab9beab2","previous_snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","recorded_at":"2026-09-21T09:56:51.953957+00:00","relationships":[],"revision":181,"snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"baseline_contract_hash":"fd05c30e23052d6ba0ecec9d94544ad214b095dddc822a13a488b0406afa001f","conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"4e76a75b59f07ba0b1768f1bb0b25f327ce5329966e2e2b3f5ec4d243f92209e","event_type":"reopen","event_version":1,"open_decisions":[],"previous_event_hash":"dc6da10e8d05167d208d5a435a3a40738825ca1d04bb60f6590a9fd52e610a79","previous_snapshot_hash":"c1cb60255161d230082a80456aeaa08351d646c592f40a1a9a1aeb32ba1b19c3","recorded_at":"2026-09-22T01:51:17.672115+00:00","relationships":[],"revision":182,"snapshot_hash":"a57ab06b427c07b6983dd16ac3b8dc2b54ab2c6c7a75e5a3346e6d3cc7547074","verdict":"BLOCKED","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":["AC-097","AC-098","DEC-092","DISC-097","REQ-097","REQ-098"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":[],"added_ids":["AC-097","AC-098","DEC-092","DISC-097","REQ-097","REQ-098"],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"03a4c1702be1000edfe55ef1559cea3d281208161d577f66426568bdb2c3cb2d","event_type":"reconcile","event_version":1,"open_decisions":[],"previous_event_hash":"4e76a75b59f07ba0b1768f1bb0b25f327ce5329966e2e2b3f5ec4d243f92209e","previous_snapshot_hash":"a57ab06b427c07b6983dd16ac3b8dc2b54ab2c6c7a75e5a3346e6d3cc7547074","recorded_at":"2026-09-22T01:52:40.460871+00:00","relationships":[],"revision":183,"snapshot_hash":"cd615ea33d737bbd17c26a8e5919b6f64b9aef4e873490f4b165d6b3b560e5fa","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"goal":"開始執行","historical_entry_evidence":"not-inferred","kind":"entry","source_ref":"user:01a0c6d2-2051-7b23-b2da-271b6992fb8f:execute-ui","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c6d2-2051-7b23-b2da-271b6992fb8f"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"d414e070c95d955cfdf9fca7f8b8323be91fc79c899e711d4933b56762bcd21f","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"03a4c1702be1000edfe55ef1559cea3d281208161d577f66426568bdb2c3cb2d","previous_snapshot_hash":"cd615ea33d737bbd17c26a8e5919b6f64b9aef4e873490f4b165d6b3b560e5fa","recorded_at":"2026-09-22T01:55:04.507735+00:00","relationships":[],"revision":183,"snapshot_hash":"cd615ea33d737bbd17c26a8e5919b6f64b9aef4e873490f4b165d6b3b560e5fa","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":["AC-097","DEC-093","DISC-098","REQ-097"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-097"],"added_ids":["DEC-093","DISC-098"],"changed_ids":["AC-097","REQ-097"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"a61d2dc217c88d9624c192710d5fec8ecc2c5cc56149461813533cdeed5b5952","event_type":"reconcile","event_version":1,"open_decisions":[],"previous_event_hash":"d414e070c95d955cfdf9fca7f8b8323be91fc79c899e711d4933b56762bcd21f","previous_snapshot_hash":"cd615ea33d737bbd17c26a8e5919b6f64b9aef4e873490f4b165d6b3b560e5fa","recorded_at":"2026-09-22T01:55:56.461784+00:00","relationships":[],"revision":184,"snapshot_hash":"9c1f521633d846cdbc53012c5b875d2743f4d131aebd5e6c668496a44c5c672b","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"discussion":{"goal":"只要處理軟體輸出JSON；韌體匯入、ESP32記憶體配置及裝置驗證這些不需要。繼續執行","historical_entry_evidence":"not-inferred","kind":"entry","source_ref":"user:01a0c6e1-3f04-7e23-8fbe-6bbdb153c03d:continue-desktop","task_ref":"01a0c356-d77c-7421-935c-72e5a478a492","turn_id":"01a0c6e1-3f04-7e23-8fbe-6bbdb153c03d"},"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"4b921925fae28b011ef932aebc25834533f1baaf6ec3521a562626214ee6fe21","event_type":"discussion","event_version":1,"open_decisions":[],"previous_event_hash":"a61d2dc217c88d9624c192710d5fec8ecc2c5cc56149461813533cdeed5b5952","previous_snapshot_hash":"9c1f521633d846cdbc53012c5b875d2743f4d131aebd5e6c668496a44c5c672b","recorded_at":"2026-09-22T02:11:29.187073+00:00","relationships":[],"revision":184,"snapshot_hash":"9c1f521633d846cdbc53012c5b875d2743f4d131aebd5e6c668496a44c5c672b","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":["AC-001","AC-002","AC-003","AC-004","AC-005","AC-006","AC-007","AC-008","AC-009","AC-010","AC-011","AC-012","AC-013","AC-014","AC-015","AC-016","AC-017","AC-018","AC-019","AC-020","AC-021","AC-022","AC-023","AC-024","AC-025","AC-026","AC-027","AC-028","AC-029","AC-030","AC-031","AC-032","AC-033","AC-034","AC-035","AC-036","AC-037","AC-038","AC-039","AC-040","AC-041","AC-042","AC-043","AC-044","AC-045","AC-046","AC-047","AC-048","AC-049","AC-050","AC-051","AC-052","AC-053","AC-054","AC-055","AC-056","AC-057","AC-058","AC-059","AC-060","AC-061","AC-062","AC-063","AC-064","AC-065","AC-066","AC-067","AC-068","AC-069","AC-070","AC-071","AC-072","AC-073","AC-074","AC-075","AC-076","AC-077","AC-078","AC-079","AC-080","AC-081","AC-082","AC-083","AC-084","AC-085","AC-086","AC-087","AC-088","AC-089","AC-090","AC-091","AC-092","AC-093","AC-094","AC-095","AC-096","AC-097","AC-098","DEC-094","DISC-099","REQ-001","REQ-002","REQ-003","REQ-004","REQ-005","REQ-006","REQ-007","REQ-008","REQ-009","REQ-010","REQ-011","REQ-012","REQ-013","REQ-014","REQ-015","REQ-016","REQ-017","REQ-018","REQ-019","REQ-020","REQ-021","REQ-022","REQ-023","REQ-024","REQ-025","REQ-026","REQ-027","REQ-028","REQ-029","REQ-030","REQ-031","REQ-032","REQ-033","REQ-034","REQ-035","REQ-036","REQ-037","REQ-038","REQ-039","REQ-040","REQ-041","REQ-042","REQ-043","REQ-044","REQ-045","REQ-046","REQ-047","REQ-048","REQ-049","REQ-050","REQ-051","REQ-052","REQ-053","REQ-054","REQ-055","REQ-056","REQ-057","REQ-058","REQ-059","REQ-060","REQ-061","REQ-062","REQ-063","REQ-064","REQ-065","REQ-066","REQ-067","REQ-068","REQ-069","REQ-070","REQ-071","REQ-072","REQ-073","REQ-074","REQ-075","REQ-076","REQ-077","REQ-078","REQ-079","REQ-080","REQ-081","REQ-082","REQ-083","REQ-084","REQ-085","REQ-086","REQ-087","REQ-088","REQ-089","REQ-090","REQ-091","REQ-092","REQ-093","REQ-094","REQ-095","REQ-096","REQ-097","REQ-098"],"conflicts":[],"continuity":"continuous","delta":{"acceptance_changes":["AC-001","AC-002","AC-003","AC-004","AC-005","AC-006","AC-007","AC-008","AC-009","AC-010","AC-011","AC-012","AC-013","AC-014","AC-015","AC-016","AC-017","AC-018","AC-019","AC-020","AC-021","AC-022","AC-023","AC-024","AC-025","AC-026","AC-027","AC-028","AC-029","AC-030","AC-031","AC-032","AC-033","AC-034","AC-035","AC-036","AC-037","AC-038","AC-039","AC-040","AC-041","AC-042","AC-043","AC-044","AC-045","AC-046","AC-047","AC-048","AC-049","AC-050","AC-051","AC-052","AC-053","AC-054","AC-055","AC-056","AC-057","AC-058","AC-059","AC-060","AC-061","AC-062","AC-063","AC-064","AC-065","AC-066","AC-067","AC-068","AC-069","AC-070","AC-071","AC-072","AC-073","AC-074","AC-075","AC-076","AC-077","AC-078","AC-079","AC-080","AC-081","AC-082","AC-083","AC-084","AC-085","AC-086","AC-087","AC-088","AC-089","AC-090","AC-091","AC-092","AC-093","AC-094","AC-095","AC-096","AC-097","AC-098"],"added_ids":["DEC-094","DISC-099"],"changed_ids":["AC-001","AC-002","AC-003","AC-004","AC-005","AC-006","AC-007","AC-008","AC-009","AC-010","AC-011","AC-012","AC-013","AC-014","AC-015","AC-016","AC-017","AC-018","AC-019","AC-020","AC-021","AC-022","AC-023","AC-024","AC-025","AC-026","AC-027","AC-028","AC-029","AC-030","AC-031","AC-032","AC-033","AC-034","AC-035","AC-036","AC-037","AC-038","AC-039","AC-040","AC-041","AC-042","AC-043","AC-044","AC-045","AC-046","AC-047","AC-048","AC-049","AC-050","AC-051","AC-052","AC-053","AC-054","AC-055","AC-056","AC-057","AC-058","AC-059","AC-060","AC-061","AC-062","AC-063","AC-064","AC-065","AC-066","AC-067","AC-068","AC-069","AC-070","AC-071","AC-072","AC-073","AC-074","AC-075","AC-076","AC-077","AC-078","AC-079","AC-080","AC-081","AC-082","AC-083","AC-084","AC-085","AC-086","AC-087","AC-088","AC-089","AC-090","AC-091","AC-092","AC-093","AC-094","AC-095","AC-096","AC-097","AC-098","REQ-001","REQ-002","REQ-003","REQ-004","REQ-005","REQ-006","REQ-007","REQ-008","REQ-009","REQ-010","REQ-011","REQ-012","REQ-013","REQ-014","REQ-015","REQ-016","REQ-017","REQ-018","REQ-019","REQ-020","REQ-021","REQ-022","REQ-023","REQ-024","REQ-025","REQ-026","REQ-027","REQ-028","REQ-029","REQ-030","REQ-031","REQ-032","REQ-033","REQ-034","REQ-035","REQ-036","REQ-037","REQ-038","REQ-039","REQ-040","REQ-041","REQ-042","REQ-043","REQ-044","REQ-045","REQ-046","REQ-047","REQ-048","REQ-049","REQ-050","REQ-051","REQ-052","REQ-053","REQ-054","REQ-055","REQ-056","REQ-057","REQ-058","REQ-059","REQ-060","REQ-061","REQ-062","REQ-063","REQ-064","REQ-065","REQ-066","REQ-067","REQ-068","REQ-069","REQ-070","REQ-071","REQ-072","REQ-073","REQ-074","REQ-075","REQ-076","REQ-077","REQ-078","REQ-079","REQ-080","REQ-081","REQ-082","REQ-083","REQ-084","REQ-085","REQ-086","REQ-087","REQ-088","REQ-089","REQ-090","REQ-091","REQ-092","REQ-093","REQ-094","REQ-095","REQ-096","REQ-097","REQ-098"],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"5e1b8b0d62d327f61b6d23f20f38246ae3d711def8934c4c25082b82a9de7b5b","event_type":"reconcile","event_version":1,"open_decisions":[],"previous_event_hash":"4b921925fae28b011ef932aebc25834533f1baaf6ec3521a562626214ee6fe21","previous_snapshot_hash":"9c1f521633d846cdbc53012c5b875d2743f4d131aebd5e6c668496a44c5c672b","recorded_at":"2026-09-22T02:14:13.493462+00:00","relationships":[],"revision":185,"snapshot_hash":"620d577dd46dd0d431b3820649ee94a14d652cad64fec389fb7bb24565a1180e","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
+{"affected_ids":[],"conflicts":[],"continuity":"continuous","delta":{"added_ids":[],"changed_ids":[],"removed_ids":[]},"epoch":"14279fcb58aa4e74adace9126eef777e","event_hash":"892b957efe2757ca51316ea7ee5f336ef1ea5a1bfc8dd52579f60b1959ecd0a7","event_type":"materialize","event_version":1,"open_decisions":[],"previous_event_hash":"5e1b8b0d62d327f61b6d23f20f38246ae3d711def8934c4c25082b82a9de7b5b","previous_snapshot_hash":"620d577dd46dd0d431b3820649ee94a14d652cad64fec389fb7bb24565a1180e","recorded_at":"2026-09-22T02:14:37.172701+00:00","relationships":[],"revision":185,"snapshot_hash":"2034ba6b675e5b20a17b4e135a02f02504f80887e961cbc0c0a476cd517d1355","verdict":"PASS","working_id":"WORKING-SPEC-01a0a7a57a23-model-parameter-export"}
 ```
 <!-- spec-audit:end -->

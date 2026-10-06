@@ -13,11 +13,11 @@ flowchart TD
 
 | ID | Level | Role | Parent | Implementation Status | Purpose |
 |---|---|---|---|---|---|
-| `profile_export` | L1 | domain | `studio_application` | implemented | Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact. |
+| `profile_export` | L1 | domain | `studio_application` | implemented | Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters. |
 
 ### `profile_export`
 
-- **Purpose:** Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact.
+- **Purpose:** Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
 - **Parent:** `studio_application`
 - **Implementation Status:** `implemented`
 - **Input Ports:** `profile.command`
@@ -71,14 +71,14 @@ flowchart TD
 
 ### `export-profile`
 
-Generate one independent header artifact for every selected qualified kernel.
+List all qualified frozen kernels with history, threshold and coverage for independent JSON export by kernel ID, with explicit name and file selection; retain header rendering for existing callers.
 
 #### Flow Diagram
 
 ```mermaid
 sequenceDiagram
     participant n_profile_export as profile_export
-    n_profile_export->>n_profile_export: Validate each qualified profile, render deterministic header artifacts, and request independent atomic file writes.
+    n_profile_export->>n_profile_export: Validate each qualified frozen profile, preserve execution settings and precision, render deterministic header or JSON content, and request individually approved atomic file writes.
     Note right of n_profile_export: profile.exported
 ```
 
@@ -86,7 +86,7 @@ sequenceDiagram
 
 | # | Module | Action | Receives | Emits | State changes | Side effects |
 |---|---|---|---|---|---|---|
-| 1 | `profile_export` | Validate each qualified profile, render deterministic header artifacts, and request independent atomic file writes. | `profile.command` | `profile.exported` | None | Write selected header files through profile.file-output, replacing only files explicitly approved by the user. |
+| 1 | `profile_export` | Validate each qualified frozen profile, preserve execution settings and precision, render deterministic header or JSON content, and request individually approved atomic file writes. | `profile.command` | `profile.exported` | None | Write selected header files through profile.file-output, replacing only files explicitly approved by the user. |
 
 - **Success:** Separate C99 or C++17 profile headers are saved for all non-skipped kernels.
 

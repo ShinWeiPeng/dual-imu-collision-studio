@@ -32,7 +32,7 @@ flowchart TD
 | `process_diagnostics` | L1 | domain | `studio_application` | implemented | Define privacy-bounded process and Learning diagnostic records independently of persistence technology. |
 | `data_workspace` | L1 | domain | `studio_application` | implemented | Own imported recordings, mappings, test conditions, cycles, annotations, and derived Normal regions. |
 | `learning_qualification` | L1 | domain | `studio_application` | implemented | Fit independently selected FIR and custom-depth MLP candidates, retain original fold kernels and replay exact frozen predictions across supplied conditions. |
-| `profile_export` | L1 | domain | `studio_application` | implemented | Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact. |
+| `profile_export` | L1 | domain | `studio_application` | implemented | Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters. |
 | `project_session` | L1 | domain | `studio_application` | implemented | Own the versioned semantic project document, source-integrity rules, and transactional reopen/save contract. |
 
 ### `studio_application`
@@ -97,7 +97,7 @@ flowchart TD
 
 ### `profile_export`
 
-- **Purpose:** Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header artifact.
+- **Purpose:** Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
 - **Parent:** `studio_application`
 - **Implementation Status:** `implemented`
 - **Input Ports:** `profile.command`

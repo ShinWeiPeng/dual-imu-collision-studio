@@ -414,8 +414,7 @@ modules:
   depends_on: []
   implements_ports: []
   description:
-    purpose: Convert each user-selected semantic profile into a separate deterministic C99 or C++17 header
-      artifact.
+    purpose: Convert qualified frozen FIR profiles into deterministic C99 or C++17 headers and version-1 JSON model parameters.
     input_ports:
     - profile.command
     output_ports:
@@ -3121,7 +3120,7 @@ types:
     kind: class
   visibility: module-public
   semantic_kind: domain-value
-  description: Public deterministic C99 and C++17 rendering seam.
+  description: Pure deterministic C99, C++17 and version-1 JSON rendering; JSON preserves numeric type and rejects non-single-sample detector semantics.
   lifetime: Selected Profile lifetime.
   mutability: immutable
   mutation_authority: *id009
@@ -3788,6 +3787,66 @@ types:
   fields: []
 type_exclusions: []
 state_objects:
+- id: json-export-queue
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: jsonExportQueue
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One desktop JSON export interaction.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: json-export-current
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: jsonExportCurrent
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One desktop JSON export interaction.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: json-export-target
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: jsonExportTarget
+    storage: file-static
+  type: url
+  visibility: private
+  lifetime: One desktop JSON export interaction.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: json-export-error
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: jsonExportError
+    storage: file-static
+  type: string
+  visibility: private
+  lifetime: One desktop JSON export interaction.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
 - id: recordings-viewport-before-wizard
   owner: desktop_adapter
   language: qml
@@ -4180,7 +4239,7 @@ flows:
       candidates or the diagnostic fallback in Replay, and retain the Cancelled terminal state.
 - id: export-profile
   owner: profile_export
-  description: Generate one independent header artifact for every selected qualified kernel.
+  description: List all qualified frozen kernels with history, threshold and coverage for independent JSON export by kernel ID, with explicit name and file selection; retain header rendering for existing callers.
   trigger:
     kind: command
     ref: profile.command
@@ -4189,8 +4248,7 @@ flows:
   - id: export-profile.step-1
     order: 1
     module: profile_export
-    action: Validate each qualified profile, render deterministic header artifacts, and request independent
-      atomic file writes.
+    action: Validate each qualified frozen profile, preserve execution settings and precision, render deterministic header or JSON content, and request individually approved atomic file writes.
     receives:
     - profile.command
     emits:
