@@ -423,14 +423,20 @@ class LearningRecording:
             self.preprocessing is None
             or self.preprocessing.sensor == "internal"
             or self.prepared_self
-        ) and np.asarray(self.internal_imu).shape != (sample_count, 3):
-            raise ValueError("Learning Internal IMU must have Nx3 shape")
+        ) and np.asarray(self.internal_imu).shape not in (
+            (sample_count, 3),
+            (sample_count, 6),
+        ):
+            raise ValueError("Learning Internal IMU must have Nx3 or Nx6 shape")
         if (
             self.preprocessing is None
             or self.preprocessing.sensor == "external"
             or self.prepared_self
-        ) and np.asarray(self.external_imu).shape != (sample_count, 3):
-            raise ValueError("Learning External IMU must have Nx3 shape")
+        ) and np.asarray(self.external_imu).shape not in (
+            (sample_count, 3),
+            (sample_count, 6),
+        ):
+            raise ValueError("Learning External IMU must have Nx3 or Nx6 shape")
         if np.asarray(self.discontinuity_before).shape != (sample_count,):
             raise ValueError("Learning discontinuity markers must match sample rows")
         if any(interval.end_index > sample_count for interval in self.intervals):
@@ -539,7 +545,7 @@ class DetectorConfig:
     score_mode: str
     confirmation_mode: str
     threshold: float
-    release_ratio: float = 0.5
+    release_ratio: float = 0.8
     release_quiet_time_s: float = 0.050
 
 
@@ -603,6 +609,22 @@ class ConditionQualification:
 
 
 @dataclass(frozen=True, slots=True)
+class CollisionQualification:
+    recording_id: str
+    collision_index: int
+    start_index: int
+    end_index: int
+    detected: bool
+    trigger_index: int | None
+    trigger_time_s: float | None
+    latency_ms: float | None
+    robustness_margin: float | None
+    snr_db: float | None
+    detection_reason: str
+    snr_unavailable_reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class RecordingQualification:
     recording_id: str
     robot_speed_mm_s: float
@@ -615,6 +637,9 @@ class RecordingQualification:
     worst_collision_latency_ms: float | None
     status: str
     collision_snrs_db: tuple[float | None, ...] = ()
+    collisions: tuple[CollisionQualification, ...] = ()
+    false_trigger_robustness_margin: float | None = None
+    collision_detection_robustness_margin: float | None = None
 
     def __post_init__(self) -> None:
         if not self.recording_id:
@@ -682,6 +707,9 @@ class QualifiedCandidate:
     diagnostic_worst_latency_ms: float | None = None
     training_evidence: KernelTrainingEvidence | None = None
     recording_qualifications: tuple[RecordingQualification, ...] = ()
+    qualification_policy: str = ""
+    qualification_input_sha256: str | None = None
+    qualification_profile_sha256: str | None = None
 
     @property
     def qualified_speed_range(self) -> tuple[float, float] | None:
@@ -735,7 +763,10 @@ class FrozenMlpModel:
             raise ValueError("Invalid MLP tap count")
         if len(self.weights) < 2 or len(self.weights) != len(self.biases):
             raise ValueError("MLP layer count mismatch")
-        previous = 3 * self.tap_count
+        channels = len(self.residual_centers)
+        if channels not in (3, 6):
+            raise ValueError("MLP requires three or six channels")
+        previous = channels * self.tap_count
         frozen_w, frozen_b = [], []
         for index, (w, b) in enumerate(zip(self.weights, self.biases)):
             w, b = np.array(w, copy=True), np.array(b, copy=True)
@@ -762,13 +793,13 @@ class FrozenMlpModel:
             w.flags.writeable = b.flags.writeable = False
             frozen_w.append(w)
             frozen_b.append(b)
-        if previous != 3:
-            raise ValueError("MLP requires three output axes")
+        if previous != channels:
+            raise ValueError("MLP output must match its channel count")
         object.__setattr__(self, "weights", tuple(frozen_w))
         object.__setattr__(self, "biases", tuple(frozen_b))
         for name in ("residual_centers", "residual_scales"):
             value = np.array(getattr(self, name), dtype=frozen_w[0].dtype, copy=True)
-            if value.shape != (3,) or not np.all(np.isfinite(value)):
+            if value.shape != (channels,) or not np.all(np.isfinite(value)):
                 raise ValueError("Invalid MLP residual parameters")
             if name == "residual_scales" and np.any(value <= 0):
                 raise ValueError("Invalid MLP residual scales")

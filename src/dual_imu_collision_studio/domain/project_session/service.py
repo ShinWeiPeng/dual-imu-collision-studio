@@ -29,6 +29,12 @@ class ProjectSessionService:
         "waveform_samples",
         "sample_rows",
         "normalized_samples",
+        "scores",
+        "detector_scores",
+        "states",
+        "detector_states",
+        "predictions",
+        "residuals",
     }
     PROFILE_FIELDS = {
         "schema_version",
@@ -416,6 +422,14 @@ class ProjectSessionService:
                 ) or assigned_evidence.intersection(identities):
                     raise ValueError("Candidate assigned to multiple algorithms")
                 subset = [p for p in profiles if p["kernel_id"] in identities]
+                if choice.get("signal_channels") and any(
+                    tuple(p.get("signal_channels", ("ax", "ay", "az")))
+                    != tuple(choice["signal_channels"])
+                    for p in subset
+                ):
+                    raise ValueError(
+                        "Saved model channels differ from training source selection"
+                    )
                 if any(
                     p.get("model_family", "fir")
                     != ("self_ridge" if key == "var" else key)
@@ -785,60 +799,116 @@ class ProjectSessionService:
         columns = tuple(mapping.get("internal_columns", ())) + tuple(
             mapping.get("external_columns", ())
         )
+        allowed = (3, 6) if mapping.get("signal_mapping_schema") == 2 else (3,)
+        present = tuple(
+            sensor
+            for sensor in ("internal", "external")
+            if mapping.get(sensor + "_columns")
+        )
+        required = (
+            (mapping["single_sensor"],)
+            if mapping.get("single_sensor")
+            else ("internal", "external")
+        )
         if (
-            len(columns) != (3 if mapping.get("single_sensor") else 6)
-            or len(set(columns)) != (3 if mapping.get("single_sensor") else 6)
-            or not all(isinstance(value, str) and value for value in columns)
+            present != required
+            or any(
+                len(mapping[sensor + "_columns"]) not in allowed for sensor in present
+            )
+            or len(set(columns)) != len(columns)
+            or not all(isinstance(v, str) and v for v in columns)
         ):
-            raise ValueError("recording mapping requires six distinct IMU columns")
+            raise ValueError(
+                "recording mapping requires distinct complete IMU signal groups"
+            )
         if "signal_mapping_schema" in mapping:
-            if mapping["signal_mapping_schema"] != 1:
+            if mapping["signal_mapping_schema"] not in (1, 2):
                 raise ValueError("Unsupported signal mapping schema")
             signals = self._mapping(mapping.get("signals"), "mapped signals")
             if set(signals) != {"internal", "external"}:
                 raise ValueError("Signal mapping requires both sensor descriptors")
-            for sensor, descriptor in signals.items():
-                descriptor = self._mapping(descriptor, "sensor descriptor")
-                mode = descriptor.get("mode")
-                raw = self._sequence(descriptor.get("raw_columns"), "raw XYZ")
-                filtered = self._sequence(
-                    descriptor.get("filtered_columns"), "filtered XYZ"
+            used_columns = set()
+            for sensor, sensor_descriptor in signals.items():
+                sensor_descriptor = self._mapping(
+                    sensor_descriptor, "sensor descriptor"
                 )
-                if mode not in {"raw", "already_filtered", "application_filtered"}:
-                    raise ValueError("Invalid signal source mode")
-                for group in (raw, filtered):
-                    if group and (
-                        len(group) != 3
-                        or len(set(group)) != 3
-                        or not all(isinstance(v, str) and v for v in group)
-                    ):
-                        raise ValueError(
-                            "Source requires a complete distinct XYZ group"
-                        )
-                if bool(filtered) != (mode == "already_filtered") or (
-                    mode == "application_filtered" and not raw
+                enabled = sensor_descriptor.get("accelerometer_enabled", True)
+                if type(enabled) is not bool:
+                    raise ValueError("Signal selection must be boolean")
+                if mapping["signal_mapping_schema"] == 1 and (
+                    not enabled or sensor_descriptor.get("gyroscope") is not None
+                ):
+                    raise ValueError("Additional signals require mapping schema 2")
+                groups = [sensor_descriptor] if enabled else []
+                if not enabled and (
+                    sensor_descriptor.get("raw_columns")
+                    or sensor_descriptor.get("filtered_columns")
                 ):
                     raise ValueError(
-                        "Filtered mapping and software filtering are mutually exclusive"
+                        "Disabled accelerometer cannot contain mapped columns"
                     )
-                if list(mapping.get(sensor + "_columns", ())) != list(raw or filtered):
-                    raise ValueError("Primary columns differ from mapped source")
-                processing = descriptor.get("settings")
-                if mode != "raw":
-                    processing = self._mapping(processing, "filter settings")
+                if sensor_descriptor.get("gyroscope") is not None:
+                    groups.append(sensor_descriptor["gyroscope"])
+                primary = []
+                for descriptor in groups:
+                    descriptor = self._mapping(descriptor, "sensor descriptor")
+                    mode = descriptor.get("mode")
+                    raw = self._sequence(descriptor.get("raw_columns"), "raw XYZ")
+                    filtered = self._sequence(
+                        descriptor.get("filtered_columns"), "filtered XYZ"
+                    )
                     if (
-                        processing.get("sensor") != sensor
-                        or processing.get("source_mode") != mode
-                    ):
-                        raise ValueError("Filter settings differ from source identity")
-                    if bool(processing.get("filters")) != (
-                        mode == "application_filtered"
+                        mapping["signal_mapping_schema"] == 2
+                        and not raw
+                        and not filtered
                     ):
                         raise ValueError(
-                            "Adopted filter design is missing or unexpected"
+                            "Selected signal requires a complete XYZ group"
                         )
-                elif processing is not None:
-                    raise ValueError("Raw mode cannot contain filter settings")
+                    if mode not in {"raw", "already_filtered", "application_filtered"}:
+                        raise ValueError("Invalid signal source mode")
+                    for group in (raw, filtered):
+                        if group and (
+                            len(group) != 3
+                            or len(set(group)) != 3
+                            or not all(isinstance(v, str) and v for v in group)
+                        ):
+                            raise ValueError(
+                                "Source requires a complete distinct XYZ group"
+                            )
+                    if bool(filtered) != (mode == "already_filtered") or (
+                        mode == "application_filtered" and not raw
+                    ):
+                        raise ValueError(
+                            "Filtered mapping and software filtering are mutually exclusive"
+                        )
+                    primary.extend(raw or filtered)
+                    occupied = set(raw + filtered)
+                    if used_columns & occupied:
+                        raise ValueError(
+                            "Signal groups must use different source columns"
+                        )
+                    used_columns.update(occupied)
+                    processing = descriptor.get("settings")
+                    if mode != "raw":
+                        processing = self._mapping(processing, "filter settings")
+                        if (
+                            processing.get("sensor") != sensor
+                            or processing.get("source_mode") != mode
+                        ):
+                            raise ValueError(
+                                "Filter settings differ from source identity"
+                            )
+                        if bool(processing.get("filters")) != (
+                            mode == "application_filtered"
+                        ):
+                            raise ValueError(
+                                "Adopted filter design is missing or unexpected"
+                            )
+                    elif processing is not None:
+                        raise ValueError("Raw mode cannot contain filter settings")
+                if list(mapping.get(sensor + "_columns", ())) != primary:
+                    raise ValueError("Primary columns differ from mapped source")
         elif mapping.get("single_sensor"):
             sensor = mapping["single_sensor"]
             if (
@@ -962,6 +1032,41 @@ class ProjectSessionService:
         missing_results = sorted(required_results - set(results))
         if missing_results:
             raise ValueError("results are missing: " + ", ".join(missing_results))
+        evidence = self._mapping(
+            results.get("qualification_evidence", {}), "qualification evidence"
+        )
+        profiles = self._sequence(results.get("profiles"), "result profiles")
+        profile_ids = {
+            str(self._mapping(p, "result Profile").get("kernel_id", ""))
+            for p in profiles
+        }
+        for key, value in evidence.items():
+            row = self._mapping(value, "qualification evidence row")
+            if key not in profile_ids or set(row) != {
+                "policy",
+                "input_sha256",
+                "profile_sha256",
+                "passed",
+                "reason",
+            }:
+                raise ValueError(
+                    "Qualification evidence has invalid fields or kernel identity"
+                )
+            if (
+                not isinstance(row["policy"], str)
+                or not row["policy"]
+                or not isinstance(row["reason"], str)
+                or type(row["passed"]) is not bool
+            ):
+                raise ValueError("Qualification evidence has invalid policy or result")
+            for field in ("input_sha256", "profile_sha256"):
+                digest = row[field]
+                if (
+                    not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)
+                ):
+                    raise ValueError("Qualification evidence has invalid identity hash")
         profiles = self._sequence(results.get("profiles"), "result profiles")
         kernel_ids: set[str] = set()
         for raw in profiles:
@@ -999,6 +1104,16 @@ class ProjectSessionService:
             tap_count = self._integer(profile["tap_count"], "Profile tap count")
             if tap_count < 1:
                 raise ValueError("Profile tap count must be positive")
+            channels = tuple(profile.get("signal_channels", ("ax", "ay", "az")))
+            if channels not in (
+                ("ax", "ay", "az"),
+                ("gx", "gy", "gz"),
+                ("ax", "ay", "az", "gx", "gy", "gz"),
+            ):
+                raise ValueError("Invalid signal channel identity or order")
+            if channels != ("ax", "ay", "az") and profile.get("signal_schema") != 2:
+                raise ValueError("Additional signals require signal schema 2")
+            channel_count = len(channels)
             family = profile.get("model_family", "fir")
             if family not in {"fir", "mlp", "self_ridge"}:
                 raise ValueError("unknown Profile model family")
@@ -1025,12 +1140,14 @@ class ProjectSessionService:
                 biases = self._sequence(profile["biases"], "MLP biases")
                 if len(weights) < 2 or len(weights) != len(biases):
                     raise ValueError("MLP requires hidden and output affine layers")
-                previous = 3 * tap_count
+                previous = channel_count * tap_count
                 for index, (matrix, bias) in enumerate(zip(weights, biases)):
                     rows = self._sequence(matrix, "MLP layer weights")
                     width = len(self._sequence(bias, "MLP layer biases"))
                     if width not in (
-                        (3,) if index == len(weights) - 1 else (4, 8, 16, 32, 64, 128)
+                        (channel_count,)
+                        if index == len(weights) - 1
+                        else (4, 8, 16, 32, 64, 128)
                     ):
                         raise ValueError("invalid MLP layer width")
                     if len(rows) != previous or any(
@@ -1059,7 +1176,7 @@ class ProjectSessionService:
                 ):
                     raise ValueError("MLP scoring contract mismatch")
                 for field in ("residual_centers", "residual_scales"):
-                    if len(self._sequence(profile[field], field)) != 3:
+                    if len(self._sequence(profile[field], field)) != channel_count:
                         raise ValueError("MLP residual parameters require three axes")
                 if any(
                     self._number(v, "MLP residual scale") <= 0
@@ -1068,8 +1185,8 @@ class ProjectSessionService:
                     raise ValueError("MLP residual scales must be positive")
             else:
                 weights = self._sequence(profile["weights"], "Profile weights")
-                if len(weights) != 3 or any(
-                    len(self._sequence(row, "Profile weight row")) != 3
+                if len(weights) != channel_count or any(
+                    len(self._sequence(row, "Profile weight row")) != channel_count
                     for row in weights
                 ):
                     raise ValueError(
@@ -1083,7 +1200,10 @@ class ProjectSessionService:
                         ):
                             raise ValueError("Profile weight tap count is inconsistent")
                 for field in ("biases", "residual_centers", "residual_scales"):
-                    if len(self._sequence(profile[field], f"Profile {field}")) != 3:
+                    if (
+                        len(self._sequence(profile[field], f"Profile {field}"))
+                        != channel_count
+                    ):
                         raise ValueError(f"Profile {field} must contain three axes")
             if profile["scale_method"] not in {"STD", "MAD"}:
                 raise ValueError("result Profile has unknown residual scale method")
@@ -1146,6 +1266,10 @@ class ProjectSessionService:
                     raise ValueError(
                         "Profile coverage has unknown qualification status"
                     )
+        if "qualification_results" in results:
+            self._validate_qualification_results(
+                results["qualification_results"], project, profile_ids
+            )
         selected = self._sequence(
             results["selected_kernel_ids"], "selected kernel identities"
         )
@@ -1162,6 +1286,331 @@ class ProjectSessionService:
             raise ValueError(
                 "preview kernel identity does not reference a retained Profile"
             )
+
+    def _validate_qualification_results(self, value, project, profile_ids) -> None:
+        section = self._mapping(value, "Qualification results")
+        if (
+            set(section) != {"schema_version", "models"}
+            or type(section["schema_version"]) is not int
+            or section["schema_version"] != 1
+        ):
+            raise ValueError("unsupported Qualification results schema")
+        models = self._mapping(section["models"], "Qualification models")
+        sources = {
+            r["recording_id"]: r for r in project["recordings"] if r["confirmed"]
+        }
+        model_fields = {
+            "policy",
+            "input_sha256",
+            "profile_sha256",
+            "stable_order",
+            "training_speeds",
+            "passing_speeds",
+            "conditions",
+            "offset_qualifications",
+            "recordings",
+            "totals",
+        }
+        recording_fields = {
+            "recording_id",
+            "robot_speed_mm_s",
+            "collision_offset_mm",
+            "normal_false_events",
+            "pick_false_events",
+            "put_false_events",
+            "collision_detected_count",
+            "collision_interval_count",
+            "worst_collision_latency_ms",
+            "status",
+            "collision_snrs_db",
+            "collisions",
+            "false_trigger_robustness_margin",
+            "collision_detection_robustness_margin",
+        }
+        event_fields = {
+            "recording_id",
+            "collision_index",
+            "start_index",
+            "end_index",
+            "detected",
+            "trigger_index",
+            "trigger_time_s",
+            "latency_ms",
+            "robustness_margin",
+            "snr_db",
+            "detection_reason",
+            "snr_unavailable_reason",
+        }
+        count_fields = (
+            "normal_false_events",
+            "pick_false_events",
+            "put_false_events",
+            "collision_detected_count",
+            "collision_interval_count",
+        )
+        total_fields = {
+            "total_misjudgments",
+            "false_trigger_count",
+            "missed_collision_count",
+            "collision_detected_count",
+            "collision_interval_count",
+            "diagnostic_worst_latency_ms",
+        }
+
+        def count(value, name):
+            number = self._integer(value, name)
+            if number < 0:
+                raise ValueError(f"{name} must be non-negative")
+            return number
+
+        def optional_number(value, name):
+            return None if value is None else self._number(value, name)
+
+        for kernel, raw in models.items():
+            model = self._mapping(raw, "Qualification model")
+            if kernel not in profile_ids or set(model) != model_fields:
+                raise ValueError("Qualification model has invalid fields or identity")
+            if not isinstance(model["policy"], str) or not model["policy"]:
+                raise ValueError("Qualification policy must be recorded")
+            for field in ("input_sha256", "profile_sha256"):
+                digest = model[field]
+                if field == "input_sha256" and digest is None:
+                    continue
+                if (
+                    not isinstance(digest, str)
+                    or len(digest) != 64
+                    or any(c not in "0123456789abcdef" for c in digest)
+                ):
+                    raise ValueError("Qualification result binding must be a SHA256")
+            count(model["stable_order"], "stable order")
+            speeds = {
+                self._number(
+                    self._mapping(r, "recording result")["robot_speed_mm_s"], "speed"
+                )
+                for r in self._sequence(model["recordings"], "recording results")
+            }
+            for field in ("training_speeds", "passing_speeds"):
+                values = self._sequence(model[field], field)
+                if list(values) != sorted(set(values)) or any(
+                    self._number(v, field) not in speeds for v in values
+                ):
+                    raise ValueError("Qualification speed scope is invalid")
+            rows = self._sequence(model["recordings"], "recording results")
+            seen = set()
+            for raw_row in rows:
+                row = self._mapping(raw_row, "recording result")
+                if set(row) != recording_fields:
+                    raise ValueError("recording result fields are incomplete")
+                identity = row["recording_id"]
+                if (
+                    not isinstance(identity, str)
+                    or identity not in sources
+                    or identity in seen
+                ):
+                    raise ValueError("recording result identity is invalid")
+                seen.add(identity)
+                source = sources[identity]
+                for field in ("robot_speed_mm_s", "collision_offset_mm"):
+                    self._number(row[field], field)
+                if row["robot_speed_mm_s"] <= 0:
+                    raise ValueError("recording result speed must be positive")
+                for field in count_fields:
+                    count(row[field], field)
+                if row["collision_detected_count"] > row["collision_interval_count"]:
+                    raise ValueError("detected Collision count exceeds denominator")
+                if row["status"] not in {"PASS", "FAIL", "COVERAGE_GAP"}:
+                    raise ValueError("recording Qualification status is invalid")
+                for field in (
+                    "worst_collision_latency_ms",
+                    "false_trigger_robustness_margin",
+                    "collision_detection_robustness_margin",
+                ):
+                    optional_number(row[field], field)
+                events = self._sequence(row["collisions"], "collision results")
+                snrs = self._sequence(row["collision_snrs_db"], "Collision SNR")
+                if len(events) != row["collision_interval_count"] or len(snrs) != len(
+                    events
+                ):
+                    raise ValueError("Collision detail count is inconsistent")
+                order = []
+                latencies = []
+                detected = 0
+                for ordinal, raw_event in enumerate(events):
+                    event = self._mapping(raw_event, "collision result")
+                    if (
+                        set(event) != event_fields
+                        or event["recording_id"] != identity
+                        or self._integer(event["collision_index"], "Collision ordinal")
+                        != ordinal
+                    ):
+                        raise ValueError("Collision result identity is invalid")
+                    start = count(event["start_index"], "Collision start")
+                    end = count(event["end_index"], "Collision end")
+                    if not start < end <= source["row_count"]:
+                        raise ValueError("Collision result interval is invalid")
+                    order.append((start, end))
+                    if type(event["detected"]) is not bool:
+                        raise ValueError("Collision detected flag must be boolean")
+                    for field in (
+                        "trigger_time_s",
+                        "latency_ms",
+                        "robustness_margin",
+                        "snr_db",
+                    ):
+                        optional_number(event[field], field)
+                    for field in ("detection_reason", "snr_unavailable_reason"):
+                        if not isinstance(event[field], str):
+                            raise ValueError("Collision result reason must be text")
+                    if event["snr_db"] != optional_number(
+                        snrs[ordinal], "Collision SNR"
+                    ) or (event["snr_db"] is None) != bool(
+                        event["snr_unavailable_reason"]
+                    ):
+                        raise ValueError(
+                            "Collision SNR or unavailable reason is inconsistent"
+                        )
+                    if event["detected"]:
+                        trigger = count(event["trigger_index"], "trigger index")
+                        if (
+                            not start <= trigger < source["row_count"]
+                            or event["trigger_time_s"] is None
+                            or event["robustness_margin"] is None
+                            or event["latency_ms"] is None
+                            or not 0 <= event["latency_ms"] <= 150
+                            or event["detection_reason"]
+                        ):
+                            raise ValueError(
+                                "detected Collision evidence is inconsistent"
+                            )
+                        detected += 1
+                        latencies.append(event["latency_ms"])
+                    elif (
+                        any(
+                            event[f] is not None
+                            for f in (
+                                "trigger_index",
+                                "trigger_time_s",
+                                "latency_ms",
+                                "robustness_margin",
+                            )
+                        )
+                        or not event["detection_reason"]
+                    ):
+                        raise ValueError("missed Collision evidence is inconsistent")
+                if (
+                    order != sorted(set(order))
+                    or detected != row["collision_detected_count"]
+                    or row["worst_collision_latency_ms"]
+                    != (max(latencies) if latencies else None)
+                ):
+                    raise ValueError(
+                        "Collision ordering or latency aggregate is inconsistent"
+                    )
+                if row["status"] == "PASS" and (
+                    not events
+                    or detected != len(events)
+                    or any(row[f] for f in count_fields[:3])
+                ):
+                    raise ValueError("PASS contradicts saved recording evidence")
+            if seen != set(sources):
+                raise ValueError(
+                    "Qualification details must cover all supplied recordings"
+                )
+            conditions = self._sequence(model["conditions"], "condition results")
+            condition_keys = set()
+            for raw_condition in conditions:
+                condition = self._mapping(raw_condition, "condition result")
+                fields = (self.COVERAGE_FIELDS - {"qualification_status"}) | {"status"}
+                if set(condition) != fields or condition["status"] not in {
+                    "PASS",
+                    "FAIL",
+                    "COVERAGE_GAP",
+                }:
+                    raise ValueError("Qualification condition fields are invalid")
+                key = (
+                    self._number(condition["robot_speed_mm_s"], "speed"),
+                    self._number(condition["collision_offset_mm"], "offset"),
+                )
+                matching = [
+                    r
+                    for r in rows
+                    if (r["robot_speed_mm_s"], r["collision_offset_mm"]) == key
+                ]
+                if not matching or key in condition_keys:
+                    raise ValueError("Qualification condition reference is invalid")
+                condition_keys.add(key)
+                for field in fields - {
+                    "robot_speed_mm_s",
+                    "collision_offset_mm",
+                    "worst_collision_latency_ms",
+                    "status",
+                }:
+                    count(condition[field], field)
+                if condition["recording_count"] != len(matching) or any(
+                    condition[f] != sum(r[f] for r in matching) for f in count_fields
+                ):
+                    raise ValueError("Qualification condition counts are inconsistent")
+                latencies = [
+                    r["worst_collision_latency_ms"]
+                    for r in matching
+                    if r["worst_collision_latency_ms"] is not None
+                ]
+                if condition["worst_collision_latency_ms"] != (
+                    max(latencies) if latencies else None
+                ):
+                    raise ValueError("Qualification condition latency is inconsistent")
+            if condition_keys != {
+                (r["robot_speed_mm_s"], r["collision_offset_mm"]) for r in rows
+            }:
+                raise ValueError("Qualification condition coverage is incomplete")
+            offsets = self._sequence(model["offset_qualifications"], "offset results")
+            seen_offsets = set()
+            for raw_offset in offsets:
+                offset = self._mapping(raw_offset, "offset result")
+                if set(offset) != {
+                    "collision_offset_mm",
+                    "passing_speeds",
+                    "collision_detectable_speeds",
+                }:
+                    raise ValueError("Qualification offset fields are invalid")
+                value = self._number(offset["collision_offset_mm"], "offset")
+                if value in seen_offsets or value not in {
+                    r["collision_offset_mm"] for r in rows
+                }:
+                    raise ValueError("Qualification offset identity is invalid")
+                seen_offsets.add(value)
+                for field in ("passing_speeds", "collision_detectable_speeds"):
+                    values = self._sequence(offset[field], field)
+                    if list(values) != sorted(set(values)) or any(
+                        self._number(v, field) not in speeds for v in values
+                    ):
+                        raise ValueError("Qualification offset speeds are invalid")
+            if seen_offsets != {r["collision_offset_mm"] for r in rows}:
+                raise ValueError("Qualification offset coverage is incomplete")
+            totals = self._mapping(model["totals"], "Qualification totals")
+            if set(totals) != total_fields:
+                raise ValueError("Qualification totals are incomplete")
+            for field in total_fields - {"diagnostic_worst_latency_ms"}:
+                count(totals[field], field)
+            false_count = sum(sum(r[f] for f in count_fields[:3]) for r in rows)
+            collision_count = sum(r["collision_interval_count"] for r in rows)
+            detected = sum(r["collision_detected_count"] for r in rows)
+            expected = {
+                "total_misjudgments": false_count + collision_count - detected,
+                "false_trigger_count": false_count,
+                "missed_collision_count": collision_count - detected,
+                "collision_detected_count": detected,
+                "collision_interval_count": collision_count,
+            }
+            latencies = [
+                r["worst_collision_latency_ms"]
+                for r in rows
+                if r["worst_collision_latency_ms"] is not None
+            ]
+            if any(totals[f] != v for f, v in expected.items()) or totals[
+                "diagnostic_worst_latency_ms"
+            ] != (max(latencies) if latencies else None):
+                raise ValueError("Qualification totals contradict saved details")
 
     def _reject_waveform_payload(self, value: object, path: str) -> None:
         if isinstance(value, Mapping):

@@ -66,10 +66,15 @@ def fit(
         1, np.max(np.abs(x), axis=0)
     )
     scale[degenerate] = 1
-    x, y = (x - mean) / scale, y - center
+    target_scale = y.std(axis=0)
+    target_scale[
+        target_scale
+        <= 64 * np.finfo(float).eps * np.maximum(1, np.max(np.abs(y), axis=0))
+    ] = 1
+    x, y = (x - mean) / scale, (y - center) / target_scale
     x[:, degenerate] = 0
     rng = np.random.default_rng(42)
-    sizes = (x.shape[1],) + tuple(hidden) + (3,)
+    sizes = (x.shape[1],) + tuple(hidden) + (y.shape[1],)
     weights, biases = [], []
     for a, b in zip(sizes, sizes[1:]):
         limit = np.sqrt(6 / (a + b))
@@ -124,6 +129,8 @@ def fit(
             break
     count = len(weights)
     weights, biases = best[:count], best[count:]
+    weights[-1] *= target_scale
+    biases[-1] *= target_scale
     weights[0][degenerate] = 0
     reference_w, reference_b = [w.copy() for w in weights], [b.copy() for b in biases]
     weights[0] /= scale[:, None]
@@ -142,8 +149,8 @@ def fit(
         frozen_weights,
         frozen_biases,
         alpha,
-        np.zeros(3, dtype=dtype),
-        np.ones(3, dtype=dtype),
+        np.zeros(y.shape[1], dtype=dtype),
+        np.ones(y.shape[1], dtype=dtype),
         len(x),
         len(x),
         epoch,
@@ -168,8 +175,7 @@ def fit(
     centers = residual.mean(axis=0)
     scales = np.sqrt(np.mean((residual - centers) ** 2, axis=0))
     limit = 64 * np.finfo(float).eps * np.maximum(1, np.max(np.abs(residual), axis=0))
-    if np.any(scales <= limit):
-        raise CandidateNumericalError("Degenerate MLP residual scale")
+    scales = np.where(scales <= limit, 1.0, scales)
     with np.errstate(over="ignore", invalid="ignore", under="ignore"):
         centers, scales = centers.astype(dtype), scales.astype(dtype)
     if (
@@ -253,7 +259,7 @@ def replay_arrays(recording, model, numeric_type):
     resets = np.array(recording.discontinuity_before, dtype=bool, copy=True)
     if len(resets):
         resets[0] = True
-    history = np.zeros((3, model.tap_count), dtype=dtype)
+    history = np.zeros((internal.shape[1], model.tap_count), dtype=dtype)
     prediction = np.empty_like(internal)
     for row in range(len(internal)):
         if resets[row]:

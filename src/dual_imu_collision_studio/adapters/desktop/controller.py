@@ -12,6 +12,9 @@ from ...domain.learning.preprocessing import (
 from ...domain.learning.self_imu import FrozenSelfImuModel, prepare_recording
 
 import math
+import hashlib
+import json
+from copy import deepcopy
 import re
 import time
 from datetime import datetime
@@ -61,10 +64,18 @@ from ...domain.learning.model import (
     QualificationResult,
     QualifiedCandidate,
     RecordingQualification,
+    CollisionQualification,
+    ConditionQualification,
+    OffsetQualification,
     DetectorConfig,
     FrozenFirModel,
     FrozenMlpModel,
     HistorySpec,
+)
+from ...domain.learning.deployment import (
+    DeploymentQualification,
+    deployment_identity,
+    COMMON_EVENT_POLICY,
 )
 from ...domain.learning.service import LearningService
 from ...domain.profile_export.model import (
@@ -93,7 +104,12 @@ class _LearningWorkerSignals(QObject):
 
 class LearningWorker(QRunnable):
     def __init__(
-        self, service: LearningService, request: LearningRequest, requests=None
+        self,
+        service: LearningService,
+        request: LearningRequest | None,
+        requests=None,
+        *,
+        requalification=None,
     ) -> None:
         super().__init__()
         self.signals = _LearningWorkerSignals()
@@ -101,11 +117,26 @@ class LearningWorker(QRunnable):
         self._request = request
         self._requests = dict(requests or {})
         self._cancelled = Event()
+        self._requalification = deepcopy(requalification)
 
     def cancel(self) -> None:
         self._cancelled.set()
 
     def run(self) -> None:
+        if self._requalification is not None:
+            try:
+                result = self._service.requalify_model(
+                    *self._requalification, cancelled=self._cancelled.is_set
+                )
+                if self._cancelled.is_set():
+                    raise InterruptedError("Qualification cancelled")
+            except InterruptedError:
+                self.signals.cancelled.emit(None)
+            except Exception as exc:
+                self.signals.failed.emit(str(exc))
+            else:
+                self.signals.completed.emit(result)
+            return
         if self._requests:
             self._run_batch()
             return
@@ -231,8 +262,10 @@ class _ModelTextExportWorker(QRunnable):
         candidate: QualifiedCandidate,
         sample_rate_hz: float,
         destination: Path,
+        signal_channels=None,
     ) -> None:
         super().__init__()
+        self._signal_channels = signal_channels
         self.signals = _ModelTextExportSignals()
         self._service = service
         self._candidate = candidate
@@ -244,13 +277,70 @@ class _ModelTextExportWorker(QRunnable):
             saved = AtomicModelTextWriter.write(
                 self._destination,
                 self._service.iter_model_text_lines(
-                    self._candidate, sample_rate_hz=self._sample_rate_hz
+                    self._candidate,
+                    sample_rate_hz=self._sample_rate_hz,
+                    signal_channels=self._signal_channels,
                 ),
             )
         except Exception as exc:
             self.signals.failed.emit(str(exc))
         else:
             self.signals.completed.emit(str(saved))
+
+
+class _JsonExportSignals(QObject):
+    finished = Signal(str, str)
+
+
+class _JsonExportWorker(QRunnable):
+    def __init__(
+        self,
+        profile,
+        candidate,
+        dataset,
+        input_hash,
+        model_name,
+        destination,
+        overwrite,
+        preprocessing,
+    ):
+        super().__init__()
+        self.signals = _JsonExportSignals()
+        self._snapshot = (profile, candidate, dataset, preprocessing)
+        self._input_hash = input_hash
+        self._model_name = model_name
+        self._destination = destination
+        self._overwrite = overwrite
+
+    def run(self):
+        try:
+            profile, candidate, dataset, preprocessing = deepcopy(self._snapshot)
+            if (
+                abs(LearningService.validate_dataset(dataset) - profile.sample_rate_hz)
+                > 1e-9
+            ):
+                raise ValueError(
+                    "Source sample rate and qualified profile are inconsistent."
+                )
+            if deployment_identity(dataset, candidate) != self._input_hash:
+                raise ValueError("Model or source changed; rerun Qualification.")
+            text = ProfileExportService().render_json(
+                profile,
+                self._model_name,
+                input_units="g",
+                source_preprocessing=preprocessing,
+            )
+            path = AtomicProfileWriter.write_json(
+                self._destination, text, replace=self._overwrite
+            )
+        except FileExistsError:
+            self.signals.finished.emit(
+                "exists", "JSON file already exists; choose Replace or Cancel."
+            )
+        except Exception as exc:
+            self.signals.finished.emit("error", "JSON export failed: " + str(exc))
+        else:
+            self.signals.finished.emit("saved", "Exported JSON model to " + str(path))
 
 
 class _ProjectSourceMissing(FileNotFoundError):
@@ -262,6 +352,7 @@ class _ProjectSourceMissing(FileNotFoundError):
 
 class StudioController(QObject):
     stateChanged = Signal()
+    jsonExportFinished = Signal(str)
 
     STAGES = (
         "Import & Map",
@@ -287,6 +378,7 @@ class StudioController(QObject):
         self._pending_project_missing_index = -1
         self._recordings: list[dict[str, object]] = []
         self._samples: dict[int, object] = {}
+        self._recent_signal_mapping: dict = {}
         self._annotations: dict[int, tuple[AnnotationInterval, ...]] = {}
         self._annotation_templates: dict[float, AnnotationTemplate] = {}
         self._annotation_undo: dict[int, list[tuple[AnnotationInterval, ...]]] = {}
@@ -301,6 +393,7 @@ class StudioController(QObject):
         self._training_algorithms = ("fir",)
         self._training_sources = {"fir": "raw", "mlp": "raw", "var": "internal"}
         self._training_selection_explicit = False
+        self._training_worker_count = 1
         self._batch_requests = {}
         self._batch_source_choices = {}
         self._batch_provenance = {}
@@ -355,11 +448,26 @@ class StudioController(QObject):
         self._approved_replacements: set[str] = set()
         self._reader = TabularReader()
         self._workspace = WorkspaceService()
-        self._learning = LearningService(learning_executor=SpawnLearningExecutor())
+        self._fold_executor = SpawnLearningExecutor()
+        self._learning = LearningService(learning_executor=self._fold_executor)
         self._export = ProfileExportService()
         self._writer = AtomicProfileWriter()
         self._project_service = ProjectSessionService()
         self._project_store = AtomicProjectStore()
+        self._json_export_worker = None
+        self._json_export_kernel = ""
+        self._qualification_results: dict[
+            str, tuple[DeploymentQualification | None, str, str]
+        ] = {}
+        self._qualification_bindings: dict[
+            str, tuple[SemanticProfile, QualifiedCandidate, LearningDataset]
+        ] = {}
+        self._qualification_worker: LearningWorker | None = None
+        self._qualification_kernel = ""
+        self._qualification_epoch = 0
+        self._qualification_job_epoch = 0
+        self._qualification_profile_hash_value = ""
+        self._qualification_cancel_requested = False
         self._learning_worker: LearningWorker | None = None
         self._replay_export_worker: _ReplayCsvExportWorker | None = None
         self._model_export_worker: _ModelTextExportWorker | None = None
@@ -563,8 +671,13 @@ class StudioController(QObject):
         viewport_end: float,
         plot_width: int,
     ) -> dict[str, object]:
-        if source_name not in {"internal_imu", "external_imu"}:
-            raise ValueError("waveform source must be internal_imu or external_imu")
+        source_name, _, signal_kind = source_name.partition(":")
+        if source_name not in {"internal_imu", "external_imu"} or signal_kind not in {
+            "",
+            "accelerometer",
+            "gyroscope",
+        }:
+            raise ValueError("Choose an IMU and signal group for the waveform")
         samples = self._samples.get(self._selected_recording)
         if samples is None:
             values = np.asarray(
@@ -580,6 +693,23 @@ class StudioController(QObject):
             }
         else:
             values = np.asarray(getattr(samples, source_name), dtype=np.float64)
+            groups = tuple(
+                self._signal_groups(
+                    self._signal_descriptors(
+                        self._recordings[self._selected_recording]
+                    )[source_name.removesuffix("_imu")]
+                )
+            )
+            if signal_kind and signal_kind not in groups:
+                return {
+                    "mode": "raw",
+                    "positions": [],
+                    "minimums": [[], [], []],
+                    "maximums": [[], [], []],
+                    "means": [[], [], []],
+                }
+            offset = groups.index(signal_kind) * 3 if signal_kind else 0
+            values = values[:, offset : offset + 3]
         projection = self._workspace.project_waveform_viewport(
             values, viewport_start, viewport_end, plot_width
         )
@@ -742,6 +872,26 @@ class StudioController(QObject):
         values["mlp_layer_widths"] = [list(v) for v in settings.mlp_layer_widths]
         values["mlp_l2"] = list(settings.mlp_l2)
         return values
+
+    @Property(int, notify=stateChanged)
+    def trainingWorkerCount(self):
+        return self._training_worker_count
+
+    @Slot(int, result=bool)
+    def setTrainingWorkers(self, count):
+        if self.learningSettingsLocked or type(count) is not int or not 1 <= count <= 8:
+            return False
+        self._training_worker_count = count
+        self.stateChanged.emit()
+        return True
+
+    @Slot()
+    def copyTrainingFailureDetails(self):
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._run_failure_reason)
 
     @Property(bool, notify=stateChanged)
     def modelSelectionsReady(self):
@@ -1293,10 +1443,18 @@ class StudioController(QObject):
                         if candidate.diagnostic_worst_latency_ms is not None
                         else "N/A"
                     ),
-                    "errors": candidate.total_misjudgments,
-                    "falseTriggers": candidate.false_trigger_count,
-                    "missedCollisions": candidate.missed_collision_count,
-                    "collisionCount": f"{candidate.collision_detected_count} / {candidate.collision_interval_count}",
+                    "errors": candidate.total_misjudgments
+                    if self._candidate_summary_available(candidate)
+                    else "N/A",
+                    "falseTriggers": candidate.false_trigger_count
+                    if self._candidate_summary_available(candidate)
+                    else "N/A",
+                    "missedCollisions": candidate.missed_collision_count
+                    if self._candidate_summary_available(candidate)
+                    else "N/A",
+                    "collisionCount": f"{candidate.collision_detected_count} / {candidate.collision_interval_count}"
+                    if self._candidate_summary_available(candidate)
+                    else "N/A",
                     "coveredOffsets": self._offset_text(candidate.active_offsets),
                     "excludedOffsets": self._offset_text(candidate.excluded_offsets),
                     "round": f"{candidate.outer_round}.{candidate.inner_round}",
@@ -1409,12 +1567,15 @@ class StudioController(QObject):
                 if isinstance(model, FrozenMlpModel)
                 else (model.weights.nbytes + model.biases.nbytes if model else 0),
                 "workingBufferBytes": (
-                    3 * model.tap_count + 2 * max(w.shape[1] for w in model.weights) + 9
+                    len(model.residual_centers) * model.tap_count
+                    + 2 * max(w.shape[1] for w in model.weights)
+                    + 3 * len(model.residual_centers)
                 )
                 * model.weights[0].dtype.itemsize
                 if isinstance(model, FrozenMlpModel)
                 else (
-                    (3 * model.tap_count + 9) * model.weights.dtype.itemsize
+                    (len(model.biases) * model.tap_count + 3 * len(model.biases))
+                    * model.weights.dtype.itemsize
                     if model
                     else 0
                 ),
@@ -1533,6 +1694,16 @@ class StudioController(QObject):
             self._pending_export_conflicts[0] if self._pending_export_conflicts else ""
         )
 
+    def _candidate_summary_available(self, candidate) -> bool:
+        return bool(
+            candidate.qualification_policy
+            or candidate.conditions
+            or any(
+                p.kernel_id == candidate.candidate_id and p.coverage
+                for p in self._profiles
+            )
+        )
+
     @Property("QVariantMap", notify=stateChanged)
     def qualificationSummary(self) -> dict[str, object]:
         candidate = self._current_candidate()
@@ -1555,7 +1726,9 @@ class StudioController(QObject):
                     else "N/A · Diagnostic only"
                 ),
                 "status": "Qualified" if exportable else "Diagnostic only",
-                "errors": candidate.total_misjudgments,
+                "errors": candidate.total_misjudgments
+                if self._candidate_summary_available(candidate)
+                else "N/A",
             }
         profile = self._current_profile()
         if profile is None:
@@ -1571,7 +1744,7 @@ class StudioController(QObject):
     @Property("QVariantList", notify=stateChanged)
     def qualificationConditions(self) -> list[dict[str, object]]:
         candidate = self._current_candidate()
-        if candidate is not None:
+        if candidate is not None and candidate.conditions:
             return [
                 {
                     "speed": f"{row.robot_speed_mm_s:g} mm/s",
@@ -1624,6 +1797,23 @@ class StudioController(QObject):
         candidate = self._current_candidate()
         if candidate is None:
             return []
+        if not candidate.recording_qualifications:
+            dataset = self._learning_dataset_for_replay()
+            return [
+                {
+                    "recordingIndex": index,
+                    "recording": row.recording_id,
+                    "speed": f"{row.robot_speed_mm_s:g} mm/s",
+                    "offset": f"{row.collision_offset_mm:g} mm",
+                    "falseCounts": "N/A",
+                    "collisionCount": "N/A",
+                    "collisionSnr": "N/A",
+                    "latency": "N/A",
+                    "status": "Not stored",
+                    "reason": "Per-recording Qualification details were not stored in this project.",
+                }
+                for index, row in enumerate(dataset.recordings if dataset else ())
+            ]
         return [
             {
                 "recordingIndex": index,
@@ -1791,7 +1981,11 @@ class StudioController(QObject):
         if path.suffix.lower() != ".txt":
             path = path.with_suffix(".txt")
         worker = _ModelTextExportWorker(
-            self._learning, candidate, float(sample_rate_hz), path
+            self._learning,
+            candidate,
+            float(sample_rate_hz),
+            path,
+            signal_channels=self._channels_for_candidate(candidate),
         )
         worker.signals.completed.connect(self._on_model_export_completed)
         worker.signals.failed.connect(self._on_model_export_failed)
@@ -1850,6 +2044,12 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def newProject(self) -> bool:
+        if self.jsonExportActive or self.qualificationValidationActive:
+            self._status_message = (
+                "Finish active export or Qualification before changing project."
+            )
+            self.stateChanged.emit()
+            return False
         if (
             self._learning_worker is not None
             or self._replay_export_worker is not None
@@ -1919,6 +2119,7 @@ class StudioController(QObject):
         self._training_log_entries.clear()
         self._training_log_discarded_count = 0
         self._header_preview = ""
+        self._invalidate_qualification()
         self._profiles.clear()
         self._retained_candidates.clear()
         self._diagnostic_candidate_ids.clear()
@@ -1962,6 +2163,12 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def openProject(self, value: QUrl) -> bool:
+        if self.jsonExportActive or self.qualificationValidationActive:
+            self._status_message = (
+                "Finish active export or Qualification before changing project."
+            )
+            self.stateChanged.emit()
+            return False
         path = self._path_from_url(value)
         if path.suffix.lower() != ".dicsproj":
             self._status_message = "Project open failed: project filename must use the .dicsproj extension."
@@ -2354,7 +2561,12 @@ class StudioController(QObject):
         )
         if signal_mapping is not None:
             row["mapping"].update(
-                signal_mapping_schema=1,
+                signal_mapping_schema=2
+                if any(
+                    "accelerometer_enabled" in value or value.get("gyroscope")
+                    for value in signal_mapping.values()
+                )
+                else 1,
                 signals=signal_mapping,
                 source_sha256=self._project_store.fingerprint(
                     str(row["path"]), str(row.get("worksheet", ""))
@@ -2369,6 +2581,24 @@ class StudioController(QObject):
             self._learning_settings = replace(
                 self._learning_settings, model_families=("fir",)
             )
+
+        def remembered(value):
+            result = dict(
+                mode="already_filtered" if value["filtered_columns"] else "raw",
+                raw_columns=list(value["raw_columns"]),
+                filtered_columns=list(value["filtered_columns"]),
+                settings=None,
+            )
+            if "accelerometer_enabled" in value:
+                result["accelerometer_enabled"] = value["accelerometer_enabled"]
+            if value.get("gyroscope") is not None:
+                result["gyroscope"] = remembered(value["gyroscope"])
+            return result
+
+        self._recent_signal_mapping = {
+            sensor: remembered(value)
+            for sensor, value in self._signal_descriptors(row).items()
+        }
         self._stale_results("Recording mapping or Test Conditions changed.")
         self._mark_project_dirty()
         self._status_message = (
@@ -2382,7 +2612,7 @@ class StudioController(QObject):
     @staticmethod
     def _signal_descriptors(row):
         mapping = row.get("mapping") or {}
-        if mapping.get("signal_mapping_schema") == 1:
+        if mapping.get("signal_mapping_schema") in (1, 2):
             return mapping["signals"]
         result = {}
         for sensor in ("internal", "external"):
@@ -2416,13 +2646,20 @@ class StudioController(QObject):
     def selectedSignalMapping(self):
         import copy
 
-        if self._selected_recording < 0 or not self._recordings[
-            self._selected_recording
-        ].get("mapping"):
+        if self._selected_recording < 0:
             return {}
-        return copy.deepcopy(
-            self._signal_descriptors(self._recordings[self._selected_recording])
-        )
+        row = self._recordings[self._selected_recording]
+        if row.get("mapping"):
+            return copy.deepcopy(self._signal_descriptors(row))
+        suggestion = copy.deepcopy(self._recent_signal_mapping)
+        available = set(self.selectedColumns)
+        for descriptor in suggestion.values():
+            for group in self._signal_groups(descriptor).values():
+                for role in ("raw_columns", "filtered_columns"):
+                    group[role] = [
+                        name if name in available else "" for name in group[role]
+                    ]
+        return suggestion
 
     def _read_signal_columns(self, row, mapping, sensor, columns):
         selected = tuple(columns)
@@ -2438,80 +2675,123 @@ class StudioController(QObject):
         )
         return self._reader.read(row["path"], source, row.get("worksheet") or None)
 
+    @staticmethod
+    def _signal_groups(descriptor):
+        groups = {}
+        if descriptor.get("accelerometer_enabled", True):
+            groups["accelerometer"] = descriptor
+        if descriptor.get("gyroscope") is not None:
+            groups["gyroscope"] = descriptor["gyroscope"]
+        return groups
+
     @Slot("QVariantMap", result=bool)
     def confirmSignalMapping(self, request):
         if self.learningSettingsLocked or self._selected_recording < 0:
             return False
         try:
             row = self._recordings[self._selected_recording]
-            signals = {}
+            signals, sensor_columns = {}, {}
             reference = None
-            sensor_columns = {}
+            all_columns = set()
             for sensor in ("internal", "external"):
-                draft = request["signals"][sensor]
-                mode = draft["mode"]
-                if mode not in {"raw", "already_filtered", "application_filtered"}:
-                    raise ValueError("Choose one preprocessing mode per IMU")
-                raw = list(draft.get("raw_columns", ()))
-                filtered = list(draft.get("filtered_columns", ()))
-                if filtered and mode != "already_filtered":
-                    raise ValueError(
-                        "Existing filtered data and software filtering are mutually exclusive"
-                    )
-                settings = None
-                if mode == "application_filtered":
-                    settings = settings_from_data(draft.get("settings"))
-                    if (
-                        settings.sensor != sensor
-                        or settings.source_mode != mode
-                        or not raw
-                    ):
-                        raise ValueError(
-                            "Preview and adopt the filter design for " + sensor
-                        )
-                elif mode == "already_filtered":
-                    if not filtered:
-                        raise ValueError(
-                            sensor.title() + " filtered XYZ mapping is required"
-                        )
-                    settings = SingleImuSettings(sensor)
-                sensor_columns[sensor] = raw or filtered
-                for columns in (raw, filtered):
-                    if not columns:
-                        continue
-                    samples = self._read_signal_columns(row, request, sensor, columns)
-                    if reference is not None and not np.array_equal(
-                        reference.time_s, samples.time_s
-                    ):
-                        raise ValueError(
-                            "All raw/filtered XYZ mappings must have the same aligned rows"
-                        )
-                    reference = samples
-                    if settings and any(
-                        abs(d.sample_rate_hz - samples.inferred_sample_rate_hz)
-                        / samples.inferred_sample_rate_hz
-                        > 0.005
-                        for d in settings.filters
-                    ):
-                        raise ValueError(
-                            "Sample rate changed after filter adoption; preview and adopt again"
-                        )
-                signals[sensor] = dict(
-                    mode=mode,
-                    raw_columns=raw,
-                    filtered_columns=filtered,
-                    settings=settings_to_data(settings) if settings else None,
+                source = request["signals"][sensor]
+                collected = dict(
+                    mode="raw", raw_columns=[], filtered_columns=[], settings=None
                 )
-            internal_columns = set(
-                signals["internal"]["raw_columns"]
-                + signals["internal"]["filtered_columns"]
-            )
-            external_columns = set(
-                signals["external"]["raw_columns"]
-                + signals["external"]["filtered_columns"]
-            )
-            if internal_columns & external_columns:
-                raise ValueError("Internal and External XYZ must use different columns")
+                if "accelerometer_enabled" in source:
+                    if type(source["accelerometer_enabled"]) is not bool:
+                        raise ValueError("Signal selection must be boolean")
+                    collected["accelerometer_enabled"] = source["accelerometer_enabled"]
+                primary = []
+                for kind, draft in self._signal_groups(source).items():
+                    mode = draft["mode"]
+                    if mode not in {"raw", "already_filtered", "application_filtered"}:
+                        raise ValueError("Choose one preprocessing mode per signal")
+                    raw = list(draft.get("raw_columns", ()))
+                    filtered = list(draft.get("filtered_columns", ()))
+                    if filtered and mode != "already_filtered":
+                        raise ValueError(
+                            "Existing filtered data and software filtering are mutually exclusive"
+                        )
+                    if (
+                        not raw
+                        and not filtered
+                        and (kind == "gyroscope" or "accelerometer_enabled" in source)
+                    ):
+                        raise ValueError(
+                            "Map a complete selected " + kind + " XYZ group"
+                        )
+                    settings = None
+                    if mode == "application_filtered":
+                        settings = settings_from_data(draft.get("settings"))
+                        if (
+                            settings.sensor != sensor
+                            or settings.source_mode != mode
+                            or not raw
+                        ):
+                            raise ValueError(
+                                "Preview and adopt the filter design for "
+                                + sensor
+                                + " "
+                                + kind
+                            )
+                    elif mode == "already_filtered":
+                        if not filtered:
+                            raise ValueError(
+                                sensor.title() + " filtered XYZ mapping is required"
+                            )
+                        settings = SingleImuSettings(sensor)
+                    group_columns = set(raw + filtered)
+                    if all_columns & group_columns:
+                        raise ValueError(
+                            "Each IMU and signal group must use different columns"
+                        )
+                    all_columns.update(group_columns)
+                    for columns in (raw, filtered):
+                        if not columns:
+                            continue
+                        if (
+                            len(columns) != 3
+                            or len(set(columns)) != 3
+                            or not all(columns)
+                        ):
+                            raise ValueError(
+                                "Map three distinct columns for each enabled XYZ group"
+                            )
+                        samples = self._read_signal_columns(
+                            row, request, sensor, columns
+                        )
+                        if reference is not None and not np.array_equal(
+                            reference.time_s, samples.time_s
+                        ):
+                            raise ValueError(
+                                "All raw/filtered XYZ mappings must have the same aligned rows"
+                            )
+                        reference = samples
+                        if settings and any(
+                            abs(d.sample_rate_hz - samples.inferred_sample_rate_hz)
+                            / samples.inferred_sample_rate_hz
+                            > 0.005
+                            for d in settings.filters
+                        ):
+                            raise ValueError(
+                                "Sample rate changed after filter adoption; preview and adopt again"
+                            )
+                    descriptor = dict(
+                        mode=mode,
+                        raw_columns=raw,
+                        filtered_columns=filtered,
+                        settings=settings_to_data(settings) if settings else None,
+                    )
+                    if kind == "accelerometer":
+                        collected.update(descriptor)
+                    else:
+                        if not raw and not filtered:
+                            raise ValueError("Map a complete Gyroscope XYZ group")
+                        collected["gyroscope"] = descriptor
+                    primary.extend(raw or filtered)
+                signals[sensor] = collected
+                sensor_columns[sensor] = primary
             if reference is None:
                 raise ValueError("Map at least one IMU complete XYZ")
             return self.confirmMapping(
@@ -2579,8 +2859,9 @@ class StudioController(QObject):
     def _source_admission_errors(self, algorithms=None, sources=None, rows=None):
         algorithms = self._training_algorithms if algorithms is None else algorithms
         sources = self._training_sources if sources is None else sources
-        errors = []
-        for row in self._recordings if rows is None else rows:
+        rows = self._recordings if rows is None else rows
+        errors, expected = [], {}
+        for row in rows:
             signals = self._signal_descriptors(row)
             for algorithm in algorithms:
                 category = "filtered" if algorithm == "var" else sources[algorithm]
@@ -2590,22 +2871,29 @@ class StudioController(QObject):
                     else ("internal", "external")
                 )
                 for sensor in sensors:
-                    descriptor = signals.get(sensor, {})
-                    available = (
-                        bool(descriptor.get("raw_columns"))
-                        if category == "raw"
-                        else (
-                            descriptor.get("mode") == "already_filtered"
-                            and bool(descriptor.get("filtered_columns"))
-                            or descriptor.get("mode") == "application_filtered"
-                            and bool(descriptor.get("raw_columns"))
-                            and bool(descriptor.get("settings"))
-                        )
-                    )
-                    if not available:
+                    groups = self._signal_groups(signals.get(sensor, {}))
+                    identity = tuple(groups)
+                    expected.setdefault(algorithm, identity)
+                    if not identity or identity != expected[algorithm]:
                         errors.append(
-                            f"{row['name']}: missing {sensor.title()} {category} XYZ; cannot run {algorithm.upper()}"
+                            f"{row['name']}: {sensor.title()} selected signals differ; cannot run {algorithm.upper()}"
                         )
+                    for kind, descriptor in groups.items():
+                        available = (
+                            bool(descriptor.get("raw_columns"))
+                            if category == "raw"
+                            else (
+                                descriptor.get("mode") == "already_filtered"
+                                and bool(descriptor.get("filtered_columns"))
+                                or descriptor.get("mode") == "application_filtered"
+                                and bool(descriptor.get("raw_columns"))
+                                and bool(descriptor.get("settings"))
+                            )
+                        )
+                        if not available:
+                            errors.append(
+                                f"{row['name']}: missing {sensor.title()} {category} {kind} XYZ; cannot run {algorithm.upper()}"
+                            )
         return errors
 
     @Property(str, notify=stateChanged)
@@ -3049,6 +3337,8 @@ class StudioController(QObject):
 
     @Slot()
     def startLearning(self) -> None:
+        if self.jsonExportActive or self.qualificationValidationActive:
+            return
         if not self.canStartLearning:
             if self.trainingAdmissionMessage:
                 self._status_message = self.trainingAdmissionMessage
@@ -3108,6 +3398,7 @@ class StudioController(QObject):
             self._status_message = str(exc)
             self.stateChanged.emit()
             return
+        self._fold_executor.configure_training_workers(self._training_worker_count)
         self._begin_learning_run()
         recording_count = (
             len(self._confirmed_workspace.recordings)
@@ -3118,6 +3409,7 @@ class StudioController(QObject):
         self._progress = 0.0
         self._run_state = "Learning"
         self._header_preview = ""
+        self._invalidate_qualification()
         self._profiles.clear()
         self._retained_candidates.clear()
         self._learning_family_provenance = ()
@@ -3198,55 +3490,501 @@ class StudioController(QObject):
     def selectRetainedKernel(self, index: int) -> None:
         self.previewKernel(index)
 
-    def _json_export_text(self, kernel_id: str, model_name: str) -> str:
-        if self._run_state not in {"Complete", "Cancelled"}:
-            raise ValueError(
-                "JSON export requires current qualified dual-IMU FIR results"
-            )
+    @staticmethod
+    def _qualification_profile_hash(profile):
+        return hashlib.sha256(
+            json.dumps(
+                asdict(profile),
+                sort_keys=True,
+                default=lambda value: (
+                    value.tolist() if isinstance(value, np.ndarray) else str(value)
+                ),
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def _remember_current_qualifications(self):
+        for profile in self._profiles:
+            try:
+                _, candidate, dataset = self._qualification_inputs(
+                    profile.kernel_id, require_finished=False
+                )
+                config = candidate.detector_config
+                if not np.isclose(config.release_ratio, 0.8) or not np.isclose(
+                    config.release_quiet_time_s, 0.05
+                ):
+                    continue
+                candidate = replace(
+                    candidate,
+                    qualification_input_sha256=deployment_identity(dataset, candidate),
+                    qualification_profile_sha256=self._qualification_profile_hash(
+                        profile
+                    ),
+                )
+                self._retained_candidates = [
+                    candidate if item.candidate_id == candidate.candidate_id else item
+                    for item in self._retained_candidates
+                ]
+                evidence = DeploymentQualification(
+                    candidate.qualification_input_sha256,
+                    COMMON_EVENT_POLICY,
+                    candidate,
+                    True,
+                    "Current common-event Qualification passed.",
+                )
+                self._qualification_results[profile.kernel_id] = (
+                    evidence,
+                    self._qualification_profile_hash(profile),
+                    evidence.reason,
+                )
+                self._qualification_bindings[profile.kernel_id] = (
+                    profile,
+                    candidate,
+                    dataset,
+                )
+            except (ValueError, TypeError):
+                continue
+
+    def _saved_qualification_evidence(self):
+        return {
+            key: {
+                "policy": evidence.policy,
+                "input_sha256": evidence.input_sha256,
+                "profile_sha256": digest,
+                "passed": evidence.passed,
+                "reason": reason,
+            }
+            for key, (evidence, digest, reason) in self._qualification_results.items()
+            if evidence is not None
+        }
+
+    def _saved_qualification_results(self):
+        evidence = self._saved_qualification_evidence()
+        profiles = {p.kernel_id: p for p in self._profiles}
+        models = {}
+        for candidate in self._retained_candidates:
+            key = candidate.candidate_id
+            if (
+                key not in profiles
+                or not candidate.qualification_policy
+                or not candidate.recording_qualifications
+            ):
+                continue
+            if any(
+                len(row.collisions) != row.collision_interval_count
+                for row in candidate.recording_qualifications
+            ):
+                continue
+            binding = evidence.get(key, {})
+            models[key] = {
+                "policy": candidate.qualification_policy,
+                "input_sha256": candidate.qualification_input_sha256
+                or binding.get("input_sha256"),
+                "profile_sha256": candidate.qualification_profile_sha256
+                or binding.get(
+                    "profile_sha256", self._qualification_profile_hash(profiles[key])
+                ),
+                "stable_order": candidate.stable_order,
+                "training_speeds": list(candidate.training_speeds),
+                "passing_speeds": list(candidate.passing_speeds),
+                "conditions": [asdict(row) for row in candidate.conditions],
+                "offset_qualifications": [
+                    asdict(row) for row in candidate.offset_qualifications
+                ],
+                "recordings": [
+                    asdict(row) for row in candidate.recording_qualifications
+                ],
+                "totals": {
+                    field: getattr(candidate, field)
+                    for field in (
+                        "total_misjudgments",
+                        "false_trigger_count",
+                        "missed_collision_count",
+                        "collision_detected_count",
+                        "collision_interval_count",
+                        "diagnostic_worst_latency_ms",
+                    )
+                },
+            }
+        return {"schema_version": 1, "models": models}
+
+    def _restore_qualification_evidence(self, data):
+        candidates = {c.candidate_id: c for c in self._retained_candidates}
+        for key, row in data.items():
+            if key in candidates:
+                evidence = DeploymentQualification(
+                    row["input_sha256"],
+                    row["policy"],
+                    candidates[key],
+                    row["passed"],
+                    row["reason"],
+                )
+                self._qualification_results[key] = (
+                    evidence,
+                    row["profile_sha256"],
+                    row["reason"],
+                )
+
+    @Property(str, notify=stateChanged)
+    def selectedQualificationStatus(self):
+        candidate = self._current_candidate()
+        if candidate is None:
+            return ""
+        state, reason, _ = self._qualification_status(candidate.candidate_id)
+        return state + ": " + reason
+
+    @Slot()
+    def requalifySelected(self):
+        candidate = self._current_candidate()
+        if candidate is not None:
+            self.requalifyKernel(candidate.candidate_id)
+
+    @Property(bool, notify=stateChanged)
+    def qualificationValidationActive(self) -> bool:
+        return self._qualification_worker is not None
+
+    def _qualification_inputs(
+        self, kernel_id, *, verify_model=True, require_finished=True
+    ):
+        if require_finished and self._run_state not in {"Complete", "Cancelled"}:
+            raise ValueError("JSON export requires current qualified results.")
         profile = next((p for p in self._profiles if p.kernel_id == kernel_id), None)
-        if profile is None:
-            raise ValueError("Choose a current qualified model before JSON export")
+        if profile is None or not profile.qualified:
+            raise ValueError("Choose a current qualified model before JSON export.")
         candidate = next(
             (c for c in self._retained_candidates if c.candidate_id == kernel_id), None
         )
-        config = candidate.detector_config if candidate is not None else None
-        if config is None:
-            # Historical SemanticProfile/header contract fixes these release settings.
-            config = DetectorConfig(
-                profile.numeric_type,
-                profile.score_mode,
-                profile.confirmation_mode,
-                profile.threshold,
+        if (
+            candidate is None
+            or not isinstance(candidate.model, (FrozenFirModel, FrozenMlpModel))
+            or candidate.detector_config is None
+        ):
+            raise ValueError(
+                "Frozen model/source evidence missing; reopen source or rerun Qualification."
+            )
+        config, model = candidate.detector_config, candidate.model
+        if any(
+            getattr(config, key) != getattr(profile, key)
+            for key in ("numeric_type", "score_mode", "threshold")
+        ):
+            raise ValueError("Frozen detector and qualified profile are inconsistent.")
+        if (
+            model.tap_count != profile.tap_count
+            or model.score_mode != profile.score_mode
+        ):
+            raise ValueError("Frozen model and qualified profile are inconsistent.")
+        if (
+            model.scale_method != profile.scale_method
+            or model.robust_k != profile.robust_k
+            or model.alpha != profile.ridge_alpha
+        ):
+            raise ValueError(
+                "Frozen model metadata and qualified profile are inconsistent."
+            )
+        dtype = np.dtype(profile.numeric_type)
+        for field in (
+            ("weights", "biases", "residual_centers", "residual_scales")
+            if verify_model and isinstance(model, FrozenFirModel)
+            else ()
+        ):
+            actual, expected = (
+                np.asarray(getattr(model, field), dtype=dtype),
+                np.asarray(getattr(profile, field), dtype=dtype),
+            )
+            if actual.shape != expected.shape or actual.tobytes() != expected.tobytes():
+                raise ValueError("Frozen model and qualified profile are inconsistent.")
+        if (
+            candidate.qualified_speed_range != profile.qualified_speed_range
+            or candidate.active_offsets != profile.covered_offsets_mm
+        ):
+            raise ValueError(
+                "Frozen qualification coverage and profile are inconsistent."
+            )
+        key = next(
+            (
+                key
+                for key, provenance in self._batch_provenance.items()
+                if kernel_id in provenance[2]
+            ),
+            "",
+        )
+        request = (
+            self._batch_requests.get(key) if key else self._active_learning_request
+        )
+        dataset = request.workspace if request is not None else None
+        if not isinstance(dataset, LearningDataset):
+            raise ValueError(
+                "Source data missing; reopen source or rerun Qualification."
             )
         if (
-            config.numeric_type != profile.numeric_type
-            or config.confirmation_mode != profile.confirmation_mode
-            or config.score_mode != profile.score_mode
-            or config.threshold != profile.threshold
+            verify_model
+            and abs(LearningService.validate_dataset(dataset) - profile.sample_rate_hz)
+            > 1e-9
         ):
-            raise ValueError("Frozen detector and qualified profile are inconsistent")
+            raise ValueError(
+                "Source sample rate and qualified profile are inconsistent."
+            )
+        return profile, candidate, dataset
+
+    def _qualification_status(self, kernel_id, *, verify_inputs=False):
+        try:
+            profile, candidate, dataset = self._qualification_inputs(
+                kernel_id, verify_model=verify_inputs
+            )
+        except (ValueError, TypeError, OverflowError) as exc:
+            return "Unavailable", str(exc), False
+        if (
+            self._qualification_worker is not None
+            and self._qualification_kernel == kernel_id
+        ):
+            return (
+                "Validating",
+                "Validating frozen model with common 0.8 / 50 ms policy…",
+                False,
+            )
+        saved = self._qualification_results.get(kernel_id)
+        if saved is None:
+            return (
+                "Needs Qualification",
+                "Run Qualification for the current 0.8 / 50 ms policy.",
+                True,
+            )
+        evidence, profile_hash, reason = saved
+        if evidence is not None and evidence.policy != COMMON_EVENT_POLICY:
+            return (
+                "Needs Qualification",
+                "Saved evidence uses an older event policy.",
+                True,
+            )
+        if evidence is None:
+            return (
+                (
+                    "Stale"
+                    if reason.startswith("Model or source changed")
+                    else "Incomplete"
+                ),
+                reason,
+                True,
+            )
+        binding = self._qualification_bindings.get(kernel_id)
+        references_changed = binding is None or any(
+            current is not original
+            for current, original in zip((profile, candidate, dataset), binding)
+        )
+        if references_changed or verify_inputs:
+            matches = profile_hash == self._qualification_profile_hash(
+                profile
+            ) and evidence.input_sha256 == deployment_identity(dataset, candidate)
+            if matches:
+                self._qualification_bindings[kernel_id] = (profile, candidate, dataset)
+        else:
+            matches = True
+        if not matches:
+            reason = "Model or source changed; rerun Qualification."
+            if verify_inputs:
+                self._qualification_results[kernel_id] = (None, "", reason)
+            return "Stale", reason, True
+        return ("PASS" if evidence.passed else "FAIL"), evidence.reason, True
+
+    @Slot(str, result=bool)
+    def requalifyKernel(self, kernel_id: str) -> bool:
+        if (
+            self._qualification_worker is not None
+            or self.jsonExportActive
+            or self._learning_worker is not None
+        ):
+            return False
+        try:
+            profile, candidate, dataset = self._qualification_inputs(kernel_id)
+            self._qualification_profile_hash_value = self._qualification_profile_hash(
+                profile
+            )
+            worker = LearningWorker(
+                LearningService(), None, requalification=(dataset, candidate)
+            )
+        except (ValueError, TypeError, OverflowError) as exc:
+            self._status_message = f"Qualification unavailable: {exc}"
+            self.stateChanged.emit()
+            return False
+        self._qualification_results.pop(kernel_id, None)
+        self._qualification_bindings.pop(kernel_id, None)
+        self._qualification_kernel = kernel_id
+        self._qualification_job_epoch = self._qualification_epoch
+        self._qualification_cancel_requested = False
+        self._qualification_worker = worker
+        worker.signals.completed.connect(self._on_qualification_completed)
+        worker.signals.failed.connect(self._on_qualification_failed)
+        worker.signals.cancelled.connect(self._on_qualification_cancelled)
+        QThreadPool.globalInstance().start(worker)
+        self.stateChanged.emit()
+        return True
+
+    @Slot()
+    def cancelQualification(self) -> None:
+        if self._qualification_worker is not None:
+            self._qualification_cancel_requested = True
+            self._qualification_worker.cancel()
+            self._status_message = "Cancelling Qualification…"
+            self.stateChanged.emit()
+
+    @Slot(object)
+    def _on_qualification_completed(self, evidence) -> None:
+        current = self._qualification_job_epoch == self._qualification_epoch
+        if current and not self._qualification_cancel_requested:
+            try:
+                profile, candidate, dataset = self._qualification_inputs(
+                    self._qualification_kernel
+                )
+                if (
+                    self._qualification_profile_hash(profile)
+                    != self._qualification_profile_hash_value
+                    or deployment_identity(dataset, candidate) != evidence.input_sha256
+                ):
+                    raise ValueError(
+                        "Model or source changed during validation; rerun Qualification."
+                    )
+                if evidence.passed:
+                    updated = replace(
+                        evidence.result,
+                        outer_round=candidate.outer_round,
+                        inner_round=candidate.inner_round,
+                        training_evidence=candidate.training_evidence,
+                        cross_validation_fold_count=candidate.cross_validation_fold_count,
+                        cross_validation_evidence_level=candidate.cross_validation_evidence_level,
+                        cross_validation_worst_condition_mse=candidate.cross_validation_worst_condition_mse,
+                        cross_validation_pooled_mse=candidate.cross_validation_pooled_mse,
+                    )
+                    updated_profile = self._profile_from_candidate(
+                        updated,
+                        profile.sample_rate_hz,
+                        profile.numeric_type,
+                        signal_channels=profile.signal_channels,
+                    )
+                    if updated_profile is None:
+                        raise ValueError(
+                            "Requalification did not produce an exportable profile."
+                        )
+                    updated = replace(
+                        updated,
+                        qualification_input_sha256=deployment_identity(
+                            dataset, updated
+                        ),
+                        qualification_profile_sha256=self._qualification_profile_hash(
+                            updated_profile
+                        ),
+                    )
+                    self._retained_candidates = [
+                        updated if c.candidate_id == updated.candidate_id else c
+                        for c in self._retained_candidates
+                    ]
+                    self._profiles = [
+                        updated_profile if p.kernel_id == updated.candidate_id else p
+                        for p in self._profiles
+                    ]
+                    profile, candidate = updated_profile, updated
+                    evidence = replace(
+                        evidence,
+                        input_sha256=candidate.qualification_input_sha256,
+                        result=candidate,
+                    )
+                    self._qualification_profile_hash_value = (
+                        self._qualification_profile_hash(profile)
+                    )
+                self._qualification_bindings[self._qualification_kernel] = (
+                    profile,
+                    candidate,
+                    dataset,
+                )
+                self._mark_project_dirty()
+                self._qualification_results[self._qualification_kernel] = (
+                    evidence,
+                    self._qualification_profile_hash_value,
+                    evidence.reason,
+                )
+                self._status_message = (
+                    "Qualification "
+                    + ("PASS: " if evidence.passed else "FAIL: ")
+                    + evidence.reason
+                )
+            except (ValueError, TypeError, OverflowError) as exc:
+                self._qualification_results[self._qualification_kernel] = (
+                    None,
+                    "",
+                    str(exc),
+                )
+                self._status_message = str(exc)
+        elif current:
+            self._qualification_results[self._qualification_kernel] = (
+                None,
+                "",
+                "Validation cancelled; rerun Qualification.",
+            )
+            self._status_message = "Qualification cancelled."
+        self._qualification_worker = None
+        self.stateChanged.emit()
+
+    @Slot(str)
+    def _on_qualification_failed(self, reason) -> None:
+        if self._qualification_job_epoch == self._qualification_epoch:
+            self._qualification_results[self._qualification_kernel] = (None, "", reason)
+            self._status_message = f"Qualification incomplete: {reason}"
+        self._qualification_worker = None
+        self.stateChanged.emit()
+
+    @Slot(object)
+    def _on_qualification_cancelled(self, _result) -> None:
+        self._on_qualification_failed("Validation cancelled; rerun Qualification.")
+
+    def _invalidate_qualification(self) -> None:
+        self._qualification_epoch += 1
+        self._qualification_results.clear()
+        self._qualification_bindings.clear()
+        if self._qualification_worker is not None:
+            self._qualification_worker.cancel()
+
+    def _json_export_text(self, kernel_id: str, model_name: str) -> str:
+        profile, _, _ = self._qualification_inputs(kernel_id)
+        state, reason, _ = self._qualification_status(kernel_id, verify_inputs=True)
+        if state != "PASS":
+            raise ValueError(reason)
         return self._export.render_json(
             profile,
             model_name,
             input_units="g",
-            release_ratio=config.release_ratio,
-            release_quiet_time_s=config.release_quiet_time_s,
+            source_preprocessing=self._json_preprocessing(kernel_id, profile),
         )
+
+    def _json_preprocessing(self, kernel_id, profile):
+        preprocessing = None
+        if profile.signal_channels != ("ax", "ay", "az"):
+            key = next(
+                (
+                    key
+                    for key, run in self._batch_provenance.items()
+                    if kernel_id in run[2]
+                ),
+                "",
+            )
+            choice = self._batch_source_choices.get(key, {"source": "raw"})
+            preprocessing = [
+                {
+                    "recording": row["name"],
+                    "selected_source": choice["source"],
+                    "signals": deepcopy(self._signal_descriptors(row)),
+                }
+                for row in self._recordings
+            ]
+        return preprocessing
 
     @Property("QVariantList", notify=stateChanged)
     def jsonExportKernels(self) -> list[dict]:
         candidates = {c.candidate_id: c for c in self._retained_candidates}
         rows = []
         for profile in self._profiles:
-            if not profile.qualified:
+            if not profile.qualified or profile.model_family != "fir":
                 continue
-            reason = ""
-            if self._run_state not in {"Complete", "Cancelled"}:
-                reason = "JSON export requires current qualified results."
-            elif profile.model_family != "fir":
-                reason = "JSON export supports dual-IMU FIR/Ridge only."
-            elif profile.confirmation_mode != "1_OF_1":
-                reason = "JSON export requires qualification with 1_OF_1 confirmation."
+            state, reason, can_validate = self._qualification_status(profile.kernel_id)
+            if state != "PASS":
+                continue
             candidate = candidates.get(profile.kernel_id)
             rows.append(
                 {
@@ -3258,7 +3996,11 @@ class StudioController(QObject):
                     )
                     if candidate is not None
                     else self._range_text(profile.qualified_speed_range),
-                    "exportable": not reason,
+                    "deploymentState": state,
+                    "canValidate": can_validate
+                    and not self.qualificationValidationActive,
+                    "validating": state == "Validating",
+                    "exportable": state == "PASS",
                     "exportReason": reason,
                 }
             )
@@ -3296,7 +4038,9 @@ class StudioController(QObject):
                 if profile.kernel_id not in self._selected_kernel_ids:
                     continue
                 name = self._export.default_model_name(profile)
-                self._json_export_text(profile.kernel_id, name)
+                reason = self.validateJsonModelName(profile.kernel_id, name)
+                if reason:
+                    raise ValueError(reason)
                 rows.append(
                     {
                         "kernelId": profile.kernel_id,
@@ -3318,33 +4062,79 @@ class StudioController(QObject):
     @Slot(str, str, result=str)
     def validateJsonModelName(self, kernel_id: str, model_name: str) -> str:
         try:
-            self._json_export_text(kernel_id, model_name)
+            self._export.validate_model_name(model_name)
+            state, reason, _ = self._qualification_status(kernel_id)
+            if state != "PASS":
+                raise ValueError(reason)
         except (ValueError, TypeError, OverflowError) as exc:
             return str(exc)
         return ""
 
+    @Property(bool, notify=stateChanged)
+    def jsonExportActive(self):
+        return self._json_export_worker is not None
+
+    @Property(str, notify=stateChanged)
+    def jsonExportKernel(self):
+        return self._json_export_kernel
+
     @Slot(str, str, QUrl, bool, result=str)
-    def exportJsonModel(
-        self, kernel_id: str, model_name: str, destination: QUrl, replace: bool
-    ) -> str:
+    def exportJsonModel(self, kernel_id, model_name, destination, replace):
+        if (
+            self.jsonExportActive
+            or self.qualificationValidationActive
+            or self._learning_worker is not None
+        ):
+            self._status_message = "Finish active work before exporting JSON."
+            return "error"
         try:
             if not destination.isLocalFile():
                 raise ValueError("Choose a local JSON destination")
-            text = self._json_export_text(kernel_id, model_name)
-            path = AtomicProfileWriter.write_json(
-                destination.toLocalFile(), text, replace=replace
+            profile, candidate, dataset = self._qualification_inputs(
+                kernel_id, verify_model=False
             )
-        except FileExistsError:
-            self._status_message = "JSON file already exists; choose Replace or Cancel."
-            self.stateChanged.emit()
-            return "exists"
+            saved = self._qualification_results.get(kernel_id)
+            if (
+                saved is None
+                or saved[0] is None
+                or not saved[0].passed
+                or saved[0].policy != COMMON_EVENT_POLICY
+            ):
+                raise ValueError("Run Qualification for the current event policy.")
+            if saved[1] != self._qualification_profile_hash(profile):
+                raise ValueError("Model or source changed; rerun Qualification.")
+            if profile.model_family != "fir":
+                raise ValueError("JSON export supports dual-IMU FIR/Ridge only.")
+            evidence = self._qualification_results[kernel_id][0]
+            worker = _JsonExportWorker(
+                profile,
+                candidate,
+                dataset,
+                evidence.input_sha256,
+                model_name,
+                destination.toLocalFile(),
+                replace,
+                self._json_preprocessing(kernel_id, profile),
+            )
         except (OSError, ValueError, TypeError, OverflowError) as exc:
-            self._status_message = f"JSON export failed: {exc}"
+            self._status_message = "JSON export failed: " + str(exc)
             self.stateChanged.emit()
             return "error"
-        self._status_message = f"Exported JSON model {model_name} to {path}"
+        self._json_export_worker = worker
+        self._json_export_kernel = kernel_id
+        worker.signals.finished.connect(self._on_json_export_finished)
+        self._status_message = "Exporting JSON…"
         self.stateChanged.emit()
-        return "saved"
+        QThreadPool.globalInstance().start(worker)
+        return "started"
+
+    @Slot(str, str)
+    def _on_json_export_finished(self, outcome, message):
+        self._json_export_worker = None
+        self._json_export_kernel = ""
+        self._status_message = message
+        self.stateChanged.emit()
+        self.jsonExportFinished.emit(outcome)
 
     @Slot(str, result=bool)
     def prepareSelectedExport(self, url_text: str) -> bool:
@@ -3591,7 +4381,9 @@ class StudioController(QObject):
         self._diagnostic_candidate_ids = {
             item.candidate_id for item in result.diagnostic_candidates
         }
+        self._invalidate_qualification()
         self._profiles = self._profiles_from_qualification(result)
+        self._remember_current_qualifications()
 
     @Slot(str)
     def _on_learning_failed(self, message: str) -> None:
@@ -3899,15 +4691,39 @@ class StudioController(QObject):
             result.candidates, supplied_speeds
         ):
             profile = self._profile_from_candidate(
-                candidate, sample_rate, self._active_learning_request.numeric_type
+                candidate,
+                sample_rate,
+                self._active_learning_request.numeric_type,
+                signal_channels=self._channels_for_candidate(candidate),
             )
             if profile is not None:
                 profiles.append(profile)
         return profiles
 
+    def _channels_for_candidate(self, candidate):
+        sensor = (
+            candidate.model.preprocessing.sensor
+            if isinstance(candidate.model, FrozenSelfImuModel)
+            else "internal"
+        )
+        if not self._recordings:
+            return ("ax", "ay", "az")
+        groups = self._signal_groups(
+            self._signal_descriptors(self._recordings[0])[sensor]
+        )
+        return tuple(
+            ("a" if kind == "accelerometer" else "g") + axis
+            for kind in groups
+            for axis in "xyz"
+        )
+
     @staticmethod
     def _profile_from_candidate(
-        candidate: QualifiedCandidate, sample_rate: float, numeric_type: str
+        candidate: QualifiedCandidate,
+        sample_rate: float,
+        numeric_type: str,
+        *,
+        signal_channels=None,
     ) -> SemanticProfile | None:
         if (
             not candidate.passing_speeds
@@ -3987,6 +4803,12 @@ class StudioController(QObject):
             else ("mlp" if isinstance(candidate.model, FrozenMlpModel) else "fir"),
             getattr(candidate.model, "epochs", 0),
             getattr(candidate.model, "stop_reason", ""),
+            signal_channels=signal_channels
+            or (
+                ("ax", "ay", "az", "gx", "gy", "gz")
+                if len(candidate.model.residual_centers) == 6
+                else ("ax", "ay", "az")
+            ),
         )
 
     def _candidate_from_profile(
@@ -3994,6 +4816,7 @@ class StudioController(QObject):
         profile: SemanticProfile,
         dataset: LearningDataset,
         stable_order: int,
+        saved_result: dict[str, object] | None = None,
     ) -> QualifiedCandidate:
         if profile.model_family == "mlp":
             model = FrozenMlpModel(
@@ -4015,17 +4838,17 @@ class StudioController(QObject):
         else:
             model = FrozenFirModel(
                 profile.tap_count,
-                np.asarray(profile.weights),
-                np.asarray(profile.biases),
+                np.asarray(profile.weights, dtype=profile.numeric_type),
+                np.asarray(profile.biases, dtype=profile.numeric_type),
                 profile.ridge_alpha,
-                np.asarray(profile.residual_centers),
-                np.asarray(profile.residual_scales),
+                np.asarray(profile.residual_centers, dtype=profile.numeric_type),
+                np.asarray(profile.residual_scales, dtype=profile.numeric_type),
                 profile.scale_method,
                 profile.robust_k,
                 profile.score_mode,
                 profile.initial_fit_rows,
                 profile.refit_rows,
-                profile.robust_k > 0,
+                None,
             )
         if profile.model_family == "self_ridge":
             from dataclasses import fields
@@ -4054,20 +4877,95 @@ class StudioController(QObject):
             )
         )
         if not training_speeds:
-            raise ValueError(
-                f"profile {profile.kernel_id} has no supplied Training speed"
-            )
-        candidate = self._learning.qualify_model(
-            dataset,
-            model,
-            config,
-            training_speeds=training_speeds,
-            active_offsets=profile.covered_offsets_mm,
+            training_speeds = tuple(sorted(set(profile.training_speed_range)))
+        # Open restores frozen values only. Missing historical details never
+        # trigger fitting, Qualification or full score replay.
+        candidate = QualifiedCandidate(
             candidate_id=profile.kernel_id,
+            training_speeds=training_speeds,
+            passing_speeds=(),
+            tap_count=profile.tap_count,
+            worst_latency_ms=profile.worst_collision_latency_ms,
+            robustness_margin=profile.combined_robustness_margin,
             stable_order=stable_order,
         )
+        if profile.coverage:
+            false_count = sum(
+                row.normal_false_events + row.pick_false_events + row.put_false_events
+                for row in profile.coverage
+            )
+            detected = sum(row.collision_detected_count for row in profile.coverage)
+            total = sum(row.collision_interval_count for row in profile.coverage)
+            candidate = replace(
+                candidate,
+                false_trigger_count=false_count,
+                missed_collision_count=total - detected,
+                total_misjudgments=false_count + total - detected,
+                collision_detected_count=detected,
+                collision_interval_count=total,
+            )
+        candidate = replace(
+            candidate, diagnostic_worst_latency_ms=profile.worst_collision_latency_ms
+        )
+        saved_speeds = tuple(
+            sorted(
+                {
+                    *profile.qualified_speed_range,
+                    *(
+                        row.robot_speed_mm_s
+                        for row in profile.coverage
+                        if row.qualification_status == "PASS"
+                        and profile.qualified_speed_range[0]
+                        <= row.robot_speed_mm_s
+                        <= profile.qualified_speed_range[1]
+                    ),
+                }
+            )
+        )
+        if saved_result is not None:
+            recordings = tuple(
+                RecordingQualification(
+                    **{
+                        **row,
+                        "collision_snrs_db": tuple(row["collision_snrs_db"]),
+                        "collisions": tuple(
+                            CollisionQualification(**event)
+                            for event in row["collisions"]
+                        ),
+                    }
+                )
+                for row in saved_result["recordings"]
+            )
+            candidate = replace(
+                candidate,
+                training_speeds=tuple(saved_result["training_speeds"]),
+                stable_order=saved_result["stable_order"],
+                conditions=tuple(
+                    ConditionQualification(**row) for row in saved_result["conditions"]
+                ),
+                offset_qualifications=tuple(
+                    OffsetQualification(
+                        row["collision_offset_mm"],
+                        tuple(row["passing_speeds"]),
+                        tuple(row["collision_detectable_speeds"]),
+                    )
+                    for row in saved_result["offset_qualifications"]
+                ),
+                recording_qualifications=recordings,
+                qualification_policy=saved_result["policy"],
+                qualification_input_sha256=saved_result["input_sha256"],
+                qualification_profile_sha256=saved_result["profile_sha256"],
+                **saved_result["totals"],
+            )
         return replace(
             candidate,
+            passing_speeds=tuple(saved_result["passing_speeds"])
+            if saved_result is not None
+            else saved_speeds,
+            worst_latency_ms=profile.worst_collision_latency_ms,
+            robustness_margin=profile.combined_robustness_margin,
+            false_trigger_robustness_margin=profile.false_trigger_robustness_margin,
+            collision_detection_robustness_margin=profile.collision_detection_robustness_margin,
             model=model,
             history=HistorySpec(
                 profile.tap_count,
@@ -4182,6 +5080,8 @@ class StudioController(QObject):
         ):
             data["results"] = {
                 "state": "complete",
+                "qualification_evidence": self._saved_qualification_evidence(),
+                "qualification_results": self._saved_qualification_results(),
                 "profiles": [
                     self._profile_to_project(profile) for profile in self._profiles
                 ],
@@ -4344,22 +5244,23 @@ class StudioController(QObject):
                 "suggestedDataStartRow": mapping.data_start_row,
                 "mapping": dict(mapping_data),
             }
-            if mapping_data.get("signal_mapping_schema") == 1:
-                for sensor, descriptor in mapping_data["signals"].items():
-                    if descriptor.get("settings"):
-                        settings_from_data(descriptor["settings"])
-                    for columns in (
-                        descriptor["raw_columns"],
-                        descriptor["filtered_columns"],
-                    ):
-                        if columns:
-                            alternate = self._read_signal_columns(
-                                row, mapping_data, sensor, columns
-                            )
-                            if not np.array_equal(alternate.time_s, loaded.time_s):
-                                raise ValueError(
-                                    "Saved signal sources have different rows"
+            if mapping_data.get("signal_mapping_schema") in (1, 2):
+                for sensor, sensor_descriptor in mapping_data["signals"].items():
+                    for descriptor in self._signal_groups(sensor_descriptor).values():
+                        if descriptor.get("settings"):
+                            settings_from_data(descriptor["settings"])
+                        for columns in (
+                            descriptor["raw_columns"],
+                            descriptor["filtered_columns"],
+                        ):
+                            if columns:
+                                alternate = self._read_signal_columns(
+                                    row, mapping_data, sensor, columns
                                 )
+                                if not np.array_equal(alternate.time_s, loaded.time_s):
+                                    raise ValueError(
+                                        "Saved signal sources have different rows"
+                                    )
             rows.append(row)
             samples_by_index[index] = loaded
             annotations_by_index[index] = annotations
@@ -4408,13 +5309,30 @@ class StudioController(QObject):
             for key, value in data.get("kernel_training_evidence", {}).items()
         }
         results = data.get("results")
+        saved_results = (
+            (results or {}).get("qualification_results", {}).get("models", {})
+        )
+        saved_evidence = deepcopy((results or {}).get("qualification_evidence", {}))
+        # Preserve readable historical result rows, but never grant current
+        # qualification from evidence belonging to a different result binding.
+        for key, result in saved_results.items():
+            evidence = saved_evidence.get(key)
+            if evidence is not None and any(
+                evidence[field] != result[field]
+                for field in ("policy", "input_sha256", "profile_sha256")
+            ):
+                saved_evidence.pop(key)
         profiles = (
             [self._profile_from_project(raw) for raw in results["profiles"]]
             if results
             else []
         )
         for profile in profiles:
-            if profile.model_family == "fir":
+            if profile.model_family == "fir" and profile.signal_channels == (
+                "ax",
+                "ay",
+                "az",
+            ):
                 self._export.render(ProfileExportRequest(profile, "C++17"))
         confirmed_workspace = (
             WorkspaceSnapshot(tuple(confirmed_recordings))
@@ -4459,6 +5377,7 @@ class StudioController(QObject):
                             )
                         ].workspace,
                         stable_order,
+                        saved_results.get(profile.kernel_id),
                     )
                     for stable_order, profile in enumerate(profiles)
                 ]
@@ -4475,13 +5394,19 @@ class StudioController(QObject):
                         "Saved single-IMU recordings have inconsistent preprocessing"
                     )
                 retained_candidates = [
-                    self._candidate_from_profile(profile, dataset, stable_order)
+                    self._candidate_from_profile(
+                        profile,
+                        dataset,
+                        stable_order,
+                        saved_results.get(profile.kernel_id),
+                    )
                     for stable_order, profile in enumerate(profiles)
                 ]
                 active_learning_request = LearningRequest(
                     dataset, str(data["numeric_type"]), settings
                 )
         return {
+            "qualification_evidence": saved_evidence,
             "training_selection": data.get("training_selection"),
             "batch_requests": batch_requests,
             "batch_source_choices": batch_choices,
@@ -4563,7 +5488,9 @@ class StudioController(QObject):
         self._retained_candidates = restored["retained_candidates"]
         self._diagnostic_candidate_ids = set()
         self._confirmed_workspace = restored["confirmed_workspace"]
+        self._invalidate_qualification()
         self._profiles = restored["profiles"]
+        self._restore_qualification_evidence(restored.get("qualification_evidence", {}))
         self._selected_kernel_ids = restored["selected_kernel_ids"]
         self._preview_kernel_id = restored["preview_kernel_id"]
         self._annotation_undo = {}
@@ -4664,6 +5591,8 @@ class StudioController(QObject):
             name: value
             for name, value in {
                 "schema_version": profile.schema_version,
+                "signal_schema": 2,
+                "signal_channels": list(profile.signal_channels),
                 "numeric_type": profile.numeric_type,
                 "sample_rate_hz": profile.sample_rate_hz,
                 "requested_history_aliases_ms": list(
@@ -4774,6 +5703,7 @@ class StudioController(QObject):
             model_family=data.get("model_family", "fir"),
             mlp_epochs=data.get("mlp_epochs", 0),
             mlp_stop_reason=data.get("mlp_stop_reason", ""),
+            signal_channels=tuple(data.get("signal_channels", ("ax", "ay", "az"))),
         )
 
     @staticmethod
@@ -4856,45 +5786,67 @@ class StudioController(QObject):
                     + ": source changed after mapping; remap before training"
                 )
             descriptors = self._signal_descriptors(row)
+            identity_sensor = source if algorithm == "var" else "internal"
+            channels = tuple(
+                ("a" if kind == "accelerometer" else "g") + axis
+                for kind in self._signal_groups(descriptors[identity_sensor])
+                for axis in "xyz"
+            )
+            if (
+                choice.get("signal_channels")
+                and tuple(choice["signal_channels"]) != channels
+            ):
+                raise ValueError(
+                    row["name"] + ": selected signals differ from the frozen model"
+                )
             values = {"internal": None, "external": None}
             eligible = np.ones(len(recording.time_s), dtype=bool)
             settings = None
             sensors = (source,) if algorithm == "var" else ("internal", "external")
+            joint_schema = row["mapping"].get("signal_mapping_schema") == 2
             for sensor in sensors:
-                descriptor = descriptors[sensor]
-                category = "filtered" if algorithm == "var" else source
-                mode = descriptor["mode"]
-                columns = (
-                    descriptor["filtered_columns"]
-                    if category == "filtered" and mode == "already_filtered"
-                    else descriptor["raw_columns"]
-                )
-                loaded = self._read_signal_columns(row, row["mapping"], sensor, columns)
-                if not np.array_equal(loaded.time_s, recording.time_s):
-                    raise ValueError(
-                        row["name"]
-                        + ": selected source rows differ from confirmed annotations"
+                parts = []
+                for kind, descriptor in self._signal_groups(
+                    descriptors[sensor]
+                ).items():
+                    category = "filtered" if algorithm == "var" else source
+                    mode = descriptor["mode"]
+                    columns = (
+                        descriptor["filtered_columns"]
+                        if category == "filtered" and mode == "already_filtered"
+                        else descriptor["raw_columns"]
                     )
-                xyz = getattr(loaded, sensor + "_imu")
-                if category == "filtered":
-                    settings = (
-                        settings_from_data(descriptor["settings"])
-                        if descriptor.get("settings")
-                        else SingleImuSettings(sensor)
+                    loaded = self._read_signal_columns(
+                        row, row["mapping"], sensor, columns
                     )
-                    if settings.sensor != sensor:
+                    if not np.array_equal(loaded.time_s, recording.time_s):
                         raise ValueError(
-                            row["name"] + ": filter source identity differs"
+                            row["name"]
+                            + ": selected source rows differ from confirmed annotations"
                         )
-                    if algorithm != "var":
-                        xyz, warm = preprocess(
-                            xyz,
-                            loaded.discontinuity_before,
-                            settings,
-                            loaded.inferred_sample_rate_hz,
+                    xyz = getattr(loaded, sensor + "_imu")
+                    if category == "filtered":
+                        settings = (
+                            settings_from_data(descriptor["settings"])
+                            if descriptor.get("settings")
+                            else SingleImuSettings(sensor)
                         )
-                        eligible &= warm
-                values[sensor] = xyz
+                        if settings.sensor != sensor:
+                            raise ValueError(
+                                row["name"] + ": filter source identity differs"
+                            )
+                        if algorithm != "var" or joint_schema:
+                            xyz, warm = preprocess(
+                                xyz,
+                                loaded.discontinuity_before,
+                                settings,
+                                loaded.inferred_sample_rate_hz,
+                            )
+                            eligible &= warm
+                    parts.append(xyz)
+                values[sensor] = np.concatenate(parts, axis=1)
+            if algorithm == "var" and joint_schema:
+                settings = SingleImuSettings(source)
             transformed.append(
                 replace(
                     recording,
@@ -4917,14 +5869,12 @@ class StudioController(QObject):
         dataset = self._learning_dataset_from_snapshot(
             WorkspaceSnapshot(tuple(transformed)), effective_rows
         )
-        if algorithm != "var":
-            dataset = LearningDataset(
-                tuple(
-                    replace(r, training_eligible=m)
-                    for r, m in zip(dataset.recordings, masks)
-                )
+        return LearningDataset(
+            tuple(
+                replace(r, training_eligible=m)
+                for r, m in zip(dataset.recordings, masks)
             )
-        return dataset
+        )
 
     def _prepare_training_batch(self):
         if self.trainingAdmissionMessage:
@@ -4934,6 +5884,17 @@ class StudioController(QObject):
             choice = {
                 "algorithm": algorithm,
                 "source": self._training_sources[algorithm],
+                "signal_channels": [
+                    ("a" if kind == "accelerometer" else "g") + axis
+                    for kind in self._signal_groups(
+                        self._signal_descriptors(self._recordings[0])[
+                            self._training_sources[algorithm]
+                            if algorithm == "var"
+                            else "internal"
+                        ]
+                    )
+                    for axis in "xyz"
+                ],
             }
             try:
                 dataset = self._dataset_for_choice(self.workspace_snapshot(), choice)
@@ -5358,6 +6319,7 @@ class StudioController(QObject):
         return format(evidence.kernel_loss, ".8g") if evidence is not None else "N/A"
 
     def _stale_results(self, reason: str) -> None:
+        self._invalidate_qualification()
         self._learning_family_provenance = ()
         self._learning_run_provenance = None
         self._kernel_training_evidence = {}

@@ -153,8 +153,8 @@ class TabularReader:
         measured = np.cumsum(steps) - 1
         count = int(measured[-1]) + 1
         times = np.empty(count, dtype=np.float64)
-        inside = np.empty((count, 3), dtype=np.float64)
-        outside = np.empty((count, 3), dtype=np.float64)
+        inside = np.empty((count, internal.shape[1]), dtype=np.float64)
+        outside = np.empty((count, external.shape[1]), dtype=np.float64)
         times[measured], inside[measured], outside[measured] = (
             time_s,
             internal,

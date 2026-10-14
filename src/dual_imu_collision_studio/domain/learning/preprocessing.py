@@ -158,7 +158,11 @@ def design_filter(
 
 def preprocess(xyz, discontinuity_before, settings: SingleImuSettings, sample_rate_hz):
     values = np.array(xyz, dtype=np.float64, copy=True)
-    if values.ndim != 2 or values.shape[1] != 3 or not np.isfinite(values).all():
+    if (
+        values.ndim != 2
+        or values.shape[1] not in (3, 6)
+        or not np.isfinite(values).all()
+    ):
         raise ValueError("Single-IMU source must contain finite XYZ samples")
     resets = np.asarray(discontinuity_before, dtype=bool)
     if resets.shape != (len(values),):

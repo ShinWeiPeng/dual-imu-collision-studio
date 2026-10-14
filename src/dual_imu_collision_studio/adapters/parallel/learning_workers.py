@@ -15,7 +15,22 @@ from dual_imu_collision_studio.domain.learning.model import (
     HardwareMemoryInsufficientError,
     HistoryExecutionError,
 )
-from dual_imu_collision_studio.domain.learning.memory import estimate_fold_memory
+
+
+def _read_memory():
+    memory = psutil.virtual_memory()
+    total, available = memory.total, memory.available
+    if (
+        not math.isfinite(total)
+        or not math.isfinite(available)
+        or total <= 0
+        or available <= 0
+        or available > total
+    ):
+        raise HistoryExecutionError(
+            "Hardware memory availability could not be measured; check execution environment"
+        )
+    return total, available
 
 
 def _fold_worker(dataset, job):
@@ -71,11 +86,22 @@ def _batch_process(dataset, connection, worker):
 class SpawnLearningExecutor:
     """One bounded batch at a time; no nested pools and no worker retries."""
 
-    def __init__(self, *, fold_worker=_fold_worker, maximum_ram_fraction=0.90):
+    def __init__(
+        self, *, fold_worker=_fold_worker, maximum_ram_fraction=0.90, training_workers=1
+    ):
         if not 0 < maximum_ram_fraction <= 1:
             raise ValueError("Invalid memory admission fraction")
+        if type(training_workers) is not int or not 1 <= training_workers <= 8:
+            raise ValueError("Training workers must be an integer from 1 to 8")
+        self._training_workers = training_workers
         self._fold_worker = fold_worker
         self._maximum_ram_fraction = maximum_ram_fraction
+
+    def configure_training_workers(self, count):
+        """Configure the next run; the composition owner calls this only while idle."""
+        if type(count) is not int or not 1 <= count <= 8:
+            raise ValueError("Training workers must be an integer from 1 to 8")
+        self._training_workers = count
 
     def evaluate_folds(self, dataset, jobs, progress=None, cancelled=None):
         return self._execute(dataset, jobs, self._fold_worker, 8, progress, cancelled)
@@ -114,100 +140,11 @@ class SpawnLearningExecutor:
         stop = cancelled or (lambda: False)
         publish = progress or (lambda *_: None)
 
-        def read_memory():
-            memory = psutil.virtual_memory()
-            total, available = memory.total, memory.available
-            if (
-                not math.isfinite(total)
-                or not math.isfinite(available)
-                or total <= 0
-                or available <= 0
-                or available > total
-            ):
-                raise HistoryExecutionError(
-                    "Hardware memory availability could not be measured; check execution environment"
-                )
-            return total, available
-
-        read_memory()
-        estimates = []
-        memory_diagnostics = []
-        for job in jobs:
-            hidden = getattr(getattr(job, "point", None), "hidden_layers", ())
-            if hidden:
-                if stop():
-                    raise InterruptedError("Learning cancelled")
-                estimate = estimate_fold_memory(dataset, job)
-                estimates.append(estimate)
-                memory_diagnostics.append(
-                    f"fold={job.fold_index}, taps={job.point.tap_count}, hidden={hidden}, "
-                    f"L2={job.point.alpha:g}, train_rows={estimate.training_rows}, "
-                    f"validation_rows={estimate.validation_rows}, "
-                    f"dataset_copy={estimate.dataset_bytes} bytes, "
-                    + ", ".join(
-                        f"{name}={value} bytes" for name, value in estimate.components
-                    )
-                )
-        # Fresh import of the release app measured 73,834,496 RSS bytes on the
-        # supported Windows/Python host. Round to the next power-of-two allowance
-        # for loader/allocator variability; verify against full native acceptance.
-        runtime_bytes = 128 * 1024 * 1024
-        serialization = 2 * max((e.dataset_bytes for e in estimates), default=0)
-        estimated = serialization + sum(
-            e.peak_bytes + runtime_bytes
-            for e in sorted(estimates, key=lambda e: e.peak_bytes, reverse=True)[
-                :capacity
-            ]
-        )
-        # Counting evidence may take time and retain allocator pages. Admission
-        # must use system headroom after that work, immediately before spawn.
-        total, available = read_memory()
-        ceiling = total * self._maximum_ram_fraction
-        budget = available - (total - ceiling)
-        if estimates:
-            memory_diagnostics.insert(
-                0,
-                f"batch additional={estimated} bytes, budget={budget:.0f} bytes, "
-                f"parent_serialization={serialization} bytes, runtime_per_worker={runtime_bytes} bytes",
-            )
-        if estimated > budget:
-            dominant = max(
-                ((name, size) for e in estimates for name, size in e.components),
-                key=lambda item: item[1],
-                default=("system pressure", 0),
-            )
-            recordings = getattr(dataset, "recordings", ())
-            rate = getattr(recordings[0], "sample_rate_hz", 0) if recordings else 0
-            histories = sorted(
-                {
-                    job.point.tap_count
-                    for job in jobs
-                    if getattr(getattr(job, "point", None), "hidden_layers", ())
-                }
-            )
-            history_label = (
-                ", ".join(
-                    f"{1000 * (taps - 1) / rate:g} ms ({taps} taps)"
-                    if rate > 0
-                    else f"{taps} taps"
-                    for taps in histories
-                )
-                or "N/A"
-            )
-            raise HardwareMemoryInsufficientError(
-                "Training memory admission rejected: "
-                f"History {history_label}; {min(capacity, len(jobs))} concurrent workers. "
-                f"Estimated additional {estimated / 1e9:.3f} GB; "
-                f"current budget {max(0, budget) / 1e9:.3f} GB; "
-                f"shortfall {max(0, estimated - budget) / 1e9:.3f} GB. "
-                f"Largest per-fold component: {dominant[0]} ({dominant[1] / 1e9:.3f} GB). "
-                "This is an estimate, not a measured peak.\n"
-                f"estimated additional={estimated} bytes, budget={budget:.0f} bytes; "
-                f"system total={total} bytes, available={available} bytes, "
-                f"ceiling={ceiling:.0f} bytes ({self._maximum_ram_fraction:.0%}). "
-                f"dominant workspace={dominant[0]} ({dominant[1]} bytes). "
-                + " | ".join(memory_diagnostics)
-            )
+        _, launch_available = _read_memory()
+        # Training count is captured explicitly; Qualification retains its cap of four.
+        if worker is self._fold_worker:
+            capacity = min(capacity, self._training_workers)
+        memory_diagnostics = ()
         context = multiprocessing.get_context("spawn")
         active = {}
         children = []
@@ -226,7 +163,7 @@ class SpawnLearningExecutor:
                 except psutil.NoSuchProcess:
                     pass
             peak = max(peak, rss)
-            current_total, current_available = read_memory()
+            current_total, current_available = _read_memory()
             occupied = current_total - current_available
             current_ceiling = current_total * self._maximum_ram_fraction
             if occupied > current_ceiling:
@@ -314,7 +251,7 @@ class SpawnLearningExecutor:
             return ExecutionBatch(
                 tuple(results[i] for i in ids),
                 peak,
-                available,
+                launch_available,
                 tuple(p.pid for p, _ in children),
                 tuple(memory_diagnostics),
             )

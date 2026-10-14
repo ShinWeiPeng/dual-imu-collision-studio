@@ -7,6 +7,8 @@ ScrollView {
     id: pane
     signal filterParametersAdopted(var parameters)
     property string sensor: "internal"
+    property string signalKind: "Accelerometer"
+    readonly property string mappingPrefix: sensor + (signalKind === "Gyroscope" ? "Gyro" : "")
     property var columns: []
     property var timeRequest: ({})
     property var filterPreview: ({})
@@ -72,36 +74,36 @@ ScrollView {
         width: pane.availableWidth
         height: implicitHeight
         spacing: 8
-        Label { text:"Map " + pane.sensor + " acceleration"; font.pixelSize:20; font.bold:true }
+        Label { text:"Map " + pane.sensor + " " + pane.signalKind; font.pixelSize:20; font.bold:true }
         Label { text:"Map available XYZ signals here. Choose algorithms and their sources in Training."; Layout.fillWidth:true; wrapMode:Text.Wrap }
         CheckBox {
-            id:rawAvailable; objectName:pane.sensor + "RawAvailable"; text:"Raw acceleration XYZ available"
+            id:rawAvailable; objectName:pane.mappingPrefix + "RawAvailable"; text:"Raw " + pane.signalKind + " XYZ available"
             onClicked:{ if (!checked) software.checked = false; pane.invalidate() }
         }
         GridLayout {
             visible:rawAvailable.checked; columns:2; Layout.fillWidth:true
             Label { text:"Raw X" }
-            ComboBox { id:rawX; objectName:pane.sensor + "RawX"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:rawX; objectName:pane.mappingPrefix + "RawX"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
             Label { text:"Raw Y" }
-            ComboBox { id:rawY; objectName:pane.sensor + "RawY"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:rawY; objectName:pane.mappingPrefix + "RawY"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
             Label { text:"Raw Z" }
-            ComboBox { id:rawZ; objectName:pane.sensor + "RawZ"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:rawZ; objectName:pane.mappingPrefix + "RawZ"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
         }
         CheckBox {
-            id:existing; objectName:pane.sensor + "ExistingFiltered"; text:"Existing filtered XYZ in this file"
+            id:existing; objectName:pane.mappingPrefix + "ExistingFiltered"; text:"Existing filtered XYZ in this file"
             onClicked:{ if (checked) software.checked = false; pane.invalidate() }
         }
         GridLayout {
             visible:existing.checked; columns:2; Layout.fillWidth:true
             Label { text:"Filtered X" }
-            ComboBox { id:filteredX; objectName:pane.sensor + "FilteredX"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:filteredX; objectName:pane.mappingPrefix + "FilteredX"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
             Label { text:"Filtered Y" }
-            ComboBox { id:filteredY; objectName:pane.sensor + "FilteredY"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:filteredY; objectName:pane.mappingPrefix + "FilteredY"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
             Label { text:"Filtered Z" }
-            ComboBox { id:filteredZ; objectName:pane.sensor + "FilteredZ"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
+            ComboBox { id:filteredZ; objectName:pane.mappingPrefix + "FilteredZ"; Layout.fillWidth:true; model:[""].concat(pane.columns); onActivated:pane.invalidate() }
         }
         CheckBox {
-            id:software; objectName:pane.sensor + "SoftwareFilter"; text:"Enable software filtering of raw XYZ"; enabled:rawAvailable.checked
+            id:software; objectName:pane.mappingPrefix + "SoftwareFilter"; text:"Enable software filtering of raw XYZ"; enabled:rawAvailable.checked
             onClicked:{ if (checked) existing.checked = false; pane.invalidate() }
         }
         Label { visible:!existing.checked && !software.checked; text:"No filtering: only raw XYZ can be selected for this IMU."; Layout.fillWidth:true; wrapMode:Text.Wrap }
@@ -129,7 +131,7 @@ ScrollView {
             Layout.minimumHeight:implicitHeight
             Layout.preferredHeight:implicitHeight
             PaddedButton {
-                id:filterAction; objectName:pane.sensor + "FilterDesignAction"
+                id:filterAction; objectName:pane.mappingPrefix + "FilterDesignAction"
                 anchors.fill:parent
                 visible:!pane.adoptedFilter.source_mode
                 enabled:visible
@@ -144,7 +146,7 @@ ScrollView {
                 }
             }
             Label {
-                id:adoptedLabel; objectName:pane.sensor + "FilterDesignAdopted"
+                id:adoptedLabel; objectName:pane.mappingPrefix + "FilterDesignAdopted"
                 anchors.fill:parent
                 visible:!!pane.adoptedFilter.source_mode
                 text:"Design adopted"; color:DesignTokens.success

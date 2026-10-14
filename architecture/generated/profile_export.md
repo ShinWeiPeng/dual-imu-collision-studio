@@ -26,7 +26,7 @@ flowchart TD
 - **Owned State:** None
 - **Side Effects:** None
 - **Errors:** None
-- **Invariants:** Every artifact contains one Profile struct, exact target numeric constants, and a machine-readable strict Score-greater-than-Threshold detector contract.; Default file names are stable dual_imu_collision_profile_kNNN.h names.; Every Profile records kernel depth, worst latency, three robustness margins, covered and excluded offsets, qualified speed interval, and exact condition tuples.
+- **Invariants:** Every artifact contains one Profile struct, exact target numeric constants, and a machine-readable strict Score-greater-than-Threshold detector contract.; Default file names are stable dual_imu_collision_profile_kNNN.h names.; Every Profile records kernel depth, worst latency, three robustness margins, covered and excluded offsets, qualified speed interval, and exact condition tuples.; SPEC-0040 schema-1 model JSON omits release_ratio and release_quiet_time_s; event release belongs to common firmware policy and execution identity excludes display names.
 - **Entrypoints:** [`ProfileExportService`](../../src/dual_imu_collision_studio/domain/profile_export/service.py) (class)
 - **Public Symbols:** [`ProfileCommandPort`](../../src/dual_imu_collision_studio/domain/profile_export/contracts.py) (protocol)<br>[`ProfileFilePort`](../../src/dual_imu_collision_studio/domain/profile_export/contracts.py) (protocol)<br>[`ProfileEventPort`](../../src/dual_imu_collision_studio/domain/profile_export/contracts.py) (protocol)
 
@@ -71,7 +71,7 @@ flowchart TD
 
 ### `export-profile`
 
-List all qualified frozen kernels with history, threshold and coverage for independent JSON export by kernel ID, with explicit name and file selection; retain header rendering for existing callers.
+List all qualified frozen kernels with history, threshold and coverage for independent JSON export by kernel ID, with explicit name and file selection; retain header rendering for existing callers. New firmware JSON omits event release fields and accepts current shared-policy Qualification evidence without a separate deployment validation step. Application-owned background work snapshots inputs, checks evidence, renders and writes atomically while projecting real busy state. Missing or stale evidence requires Qualification from Replay. Historic headers and existing schema-1/schema-2 signal-format contracts remain unchanged.
 
 #### Flow Diagram
 

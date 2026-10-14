@@ -91,7 +91,9 @@ def evaluate_fold_job(service, dataset, job, cancelled=None):
                 indexes = common_indexes(evidence, maximum_taps)
                 matrix = service._prepare_fir_matrix(evidence, point.tap_count)
                 validation.append(
-                    matrix.features[np.searchsorted(matrix.row_indexes, indexes)]
+                    np.asarray(
+                        matrix.features[np.searchsorted(matrix.row_indexes, indexes)]
+                    )
                 )
             model = fit(
                 fitting.features,
@@ -114,6 +116,19 @@ def evaluate_fold_job(service, dataset, job, cancelled=None):
                 use_robust_refit=job.settings.use_robust_refit,
                 numeric_type=job.numeric_type,
             )
+        # Preserve the established single-signal loss unit; mixed physical units
+        # require Training-only per-channel scaling for joint model selection.
+        target_scale = (
+            np.std(fitting.targets, axis=0)
+            if fitting.targets.shape[1] == 6
+            else np.ones(3)
+        )
+        target_scale[
+            target_scale
+            <= 64
+            * np.finfo(float).eps
+            * np.maximum(1, np.max(np.abs(fitting.targets), axis=0))
+        ] = 1
         losses = {}
         for subset, groups in ((0, job.training_groups), (1, job.held_out_groups)):
             for key, selected in condition_groups(groups):
@@ -151,7 +166,7 @@ def evaluate_fold_job(service, dataset, job, cancelled=None):
                     )
                     - prediction
                 ).astype(np.float64)
-                mse = float(np.mean(residual * residual))
+                mse = float(np.mean((residual / target_scale) ** 2))
                 if not math.isfinite(mse):
                     raise CandidateNumericalError("Non-finite MSE")
                 losses.setdefault(key, [None, None, 0, 0])[subset] = mse
@@ -319,6 +334,8 @@ def evaluate_fixed_parameters(
             lambda done, total: publish("Fixed-grid CV", 0, total - done, None),
             stop,
         )
+    if batch.memory_diagnostics:
+        publish("FIR memory: " + " | ".join(batch.memory_diagnostics), 0, 0, batch)
     expected = {job.job_index: job for job in jobs}
     if len(batch.results) != len(expected) or {
         result.job_index for result in batch.results
@@ -454,6 +471,13 @@ def search_parameters(
                 tuple(jobs),
                 lambda done, total: publish(stage, len(cache), total - done, None),
                 stop,
+            )
+        if batch.memory_diagnostics:
+            publish(
+                "FIR memory: " + " | ".join(batch.memory_diagnostics),
+                len(cache),
+                0,
+                batch,
             )
         expected = {j.job_index: j for j in jobs}
         if len(batch.results) != len(expected) or {
@@ -676,7 +700,7 @@ def qualify_fold(
             "L2_NORM",
             confirmation,
             float(dtype(threshold)),
-            float(dtype(0.5)),
+            float(dtype(0.8)),
             float(dtype(0.05)),
         )
         for confirmation, threshold in product(service.CONFIRMATION_MODES, thresholds)

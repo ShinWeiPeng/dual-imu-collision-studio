@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
+import tempfile
 import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -54,6 +57,74 @@ def _exit_code(diagnostics: list[dict[str, Any]]) -> int:
     return 0
 
 
+def _load_authored_manifest(manifest_path: Path) -> dict[str, Any]:
+    """Compile this repository's authored collection; legacy manifests stay valid."""
+    root = manifest_path.resolve().parent.parent
+    index_path = root / "architecture/designs/index.yaml"
+    if not index_path.exists():
+        return load_yaml(manifest_path)
+    index = load_yaml(index_path)
+    if (
+        index.get("format_version") != 1
+        or not isinstance(index.get("documents"), list)
+        or not index["documents"]
+    ):
+        raise ValueError("invalid architecture design collection")
+    manifest = {}
+    seen = set()
+    for relative in index["documents"]:
+        if not isinstance(relative, str):
+            raise ValueError("design collection paths must be strings")
+        path = root / relative
+        if (
+            path.is_symlink()
+            or not path.resolve().is_relative_to(index_path.parent.resolve())
+            or path.suffix != ".md"
+            or path.resolve() in seen
+        ):
+            raise ValueError("invalid or duplicate design collection path")
+        seen.add(path.resolve())
+        text = path.read_text(encoding="utf-8")
+        blocks = re.findall(
+            r"<!-- design-data:1 -->\s*```yaml\s*\n(.*?)\n```", text, re.S
+        )
+        if len(blocks) != 1:
+            raise ValueError(f"{relative}: expected exactly one design-data block")
+        data = yaml.safe_load(blocks[0])
+        if not isinstance(data, dict):
+            raise ValueError(f"{relative}: design data must be an object")
+        if set(data) == {"manifest_field", "value"}:
+            field = data["manifest_field"]
+            if not isinstance(field, str) or field in manifest:
+                raise ValueError(f"{relative}: invalid or duplicate manifest field")
+            manifest[field] = data["value"]
+        elif set(data) == {"manifest_record"}:
+            kind = re.search(r"\|\s*kind\s*\|\s*(module|flow)\s*\|", text)
+            if kind is None or not isinstance(data["manifest_record"], dict):
+                raise ValueError(f"{relative}: invalid design record kind")
+            field = "modules" if kind[1] == "module" else "flows"
+            manifest.setdefault(field, []).append(data["manifest_record"])
+        else:
+            raise ValueError(f"{relative}: unsupported design data fields")
+    return manifest
+
+
+def _write_compiled_manifest(path: Path, manifest: dict[str, Any]) -> None:
+    """Only the render command writes this generated projection atomically."""
+    content = yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True)
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return
+    descriptor, name = tempfile.mkstemp(
+        prefix=".manifest-", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write(content)
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
 def run_gate(
     *,
     phase: str,
@@ -65,7 +136,11 @@ def run_gate(
 ) -> tuple[int, dict[str, Any]]:
     if phase not in PHASES:
         raise ValueError(f"unsupported gate phase: {phase}")
-    manifest = load_yaml(manifest_path)
+    manifest = (
+        _load_authored_manifest(manifest_path)
+        if phase == "design"
+        else load_yaml(manifest_path)
+    )
     project_root = manifest_path.resolve().parent.parent
     diagnostics = [
         _as_dict(item)
@@ -77,6 +152,17 @@ def run_gate(
             check_docs=phase != "design",
         )
     ]
+    if phase != "design" and _load_authored_manifest(manifest_path) != manifest:
+        diagnostics.append(
+            dict(
+                rule_id="DOC003",
+                severity="MUST",
+                location="architecture/manifest.yaml",
+                message="Generated manifest differs from architecture/designs; run architecture_cli.py render.",
+                configuration=False,
+                disposition="active",
+            )
+        )
     analyzers: dict[str, Any] = {}
     adoption = _load_optional(adoption_path) if phase != "design" else None
     if phase != "design":
@@ -121,11 +207,7 @@ def run_gate(
         "analyzers": analyzers,
         "diagnostics": diagnostics,
     }
-    if (
-        phase != "design"
-        and check_adoption_docs
-        and adoption is not None
-    ):
+    if phase != "design" and check_adoption_docs and adoption is not None:
         adoption_diagnostics = compare_adoption_documents(
             manifest_path,
             manifest,
@@ -137,9 +219,7 @@ def run_gate(
         code = _exit_code(diagnostics)
         evidence["exit_code"] = code
         evidence["gate_result"] = "PASS" if code == 0 else "BLOCKED"
-        evidence["readiness_status"] = readiness_status(
-            diagnostics, phase=phase
-        )
+        evidence["readiness_status"] = readiness_status(diagnostics, phase=phase)
     return code, evidence
 
 
@@ -214,7 +294,13 @@ def _render_command(args: argparse.Namespace) -> int:
     from render_architecture import write_documents
 
     try:
-        manifest = load_yaml(args.manifest)
+        manifest = _load_authored_manifest(args.manifest)
+        planned = validate_manifest(
+            manifest, args.manifest, None, None, check_docs=False
+        )
+        if any(item.severity == "MUST" for item in planned):
+            raise ValueError("invalid authored architecture design")
+        _write_compiled_manifest(args.manifest, manifest)
         adoption = load_yaml(args.adoption)
         baseline = _load_optional(args.baseline)
         _, evidence = run_gate(
@@ -234,8 +320,7 @@ def _render_command(args: argparse.Namespace) -> int:
         ]
         if blockers:
             summary = "; ".join(
-                f"{item.get('rule_id')} {item.get('location')}"
-                for item in blockers[:5]
+                f"{item.get('rule_id')} {item.get('location')}" for item in blockers[:5]
             )
             raise ValueError(
                 "refusing to render from invalid authoritative inputs: " + summary
@@ -277,7 +362,9 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     gate = commands.add_parser("gate", help="run one governed phase gate")
     gate.add_argument("--phase", choices=PHASES, required=True)
-    gate.add_argument("--manifest", type=Path, default=Path("architecture/manifest.yaml"))
+    gate.add_argument(
+        "--manifest", type=Path, default=Path("architecture/manifest.yaml")
+    )
     gate.add_argument(
         "--adoption", type=Path, default=Path("architecture/adoption.yaml")
     )

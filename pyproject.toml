@@ -30,5 +30,5 @@ where = ["src"]
 dual_imu_collision_studio = ["qml/*.qml", "qml/*.svg", "qml/components/*.qml"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "tests"]
 testpaths = ["tests"]

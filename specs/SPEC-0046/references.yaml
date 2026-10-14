@@ -1,0 +1,40 @@
+format_version: 1
+canonical: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+sections:
+- section: Problem
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: Solution
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: User Stories
+  path: specs/SPEC-0046/requirements.md
+- section: Requirements
+  path: specs/SPEC-0046/requirements.md
+- section: Decisions
+  path: specs/SPEC-0046/discussion.md
+- section: Acceptance Criteria
+  path: specs/SPEC-0046/acceptance.md
+- section: Acceptance Mapping
+  path: specs/SPEC-0046/acceptance.md
+- section: Discussion Context
+  path: specs/SPEC-0046/discussion.md
+- section: Relationships
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: Out of Scope
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: Open Decisions
+  path: specs/SPEC-0046/discussion.md
+- section: Routing/Gates
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: Revision History
+  path: specs/SPEC-0046/discussion.md
+- section: Current Specification
+  path: specs/SPEC-0046-fir-worker-memory-diagnosis.md
+- section: Decision History
+  path: specs/SPEC-0046/discussion.md
+- section: Pending Discussion
+  path: specs/SPEC-0046/discussion.md
+- section: Completeness Gaps
+  path: specs/SPEC-0046/discussion.md
+- section: Discussion History
+  path: specs/SPEC-0046/discussion.md
+designs: []

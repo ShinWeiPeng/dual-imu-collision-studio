@@ -159,12 +159,16 @@ class Recording:
             raise ValueError("time and IMU arrays must have equal row counts")
         if self.internal_imu is not None and getattr(
             self.internal_imu, "shape", (0, 0)
-        )[1:] != (3,):
-            raise ValueError("Internal IMU must contain exactly X, Y, and Z")
+        )[1:] not in ((3,), (6,)):
+            raise ValueError(
+                "Internal IMU must contain one or two complete XYZ signal groups"
+            )
         if self.external_imu is not None and getattr(
             self.external_imu, "shape", (0, 0)
-        )[1:] != (3,):
-            raise ValueError("External IMU must contain exactly X, Y, and Z")
+        )[1:] not in ((3,), (6,)):
+            raise ValueError(
+                "External IMU must contain one or two complete XYZ signal groups"
+            )
         if (
             self.discontinuity_before is not None
             and len(self.discontinuity_before) != sample_count
@@ -197,7 +201,7 @@ class ColumnMapping:
     time_column: str | None
     time_unit: str | None
     sample_rate_hz: float | None
-    internal_columns: tuple[str, str, str]
+    internal_columns: tuple[str, ...]
     external_columns: tuple[str, ...]
     single_sensor: str | None = None
 
@@ -205,16 +209,37 @@ class ColumnMapping:
         if self.data_start_row < 1:
             raise ValueError("Data Start Row is 1-based")
         imu_columns = self.internal_columns + self.external_columns
-        expected = 6 if self.single_sensor is None else 3
+        expected = len(imu_columns)
         if self.single_sensor not in {None, "internal", "external"}:
             raise ValueError("Invalid single sensor identity")
-        if len(imu_columns) != expected or len(set(imu_columns)) != expected:
-            raise ValueError("every mapped IMU axis must use a distinct column")
         if (
-            self.single_sensor is not None
-            and len(getattr(self, self.single_sensor + "_columns")) != 3
+            not expected
+            or len(set(imu_columns)) != expected
+            or any(not name for name in imu_columns)
         ):
-            raise ValueError("Select exactly three columns for the single sensor")
+            raise ValueError("every mapped IMU axis must use a distinct column")
+        if self.single_sensor is not None and len(
+            getattr(self, self.single_sensor + "_columns")
+        ) not in (3, 6):
+            raise ValueError(
+                "Select one or two complete XYZ groups for the single sensor"
+            )
+        if any(
+            len(v) not in (3, 6)
+            for v in (self.internal_columns, self.external_columns)
+            if v
+        ):
+            raise ValueError("Each IMU requires one or two complete XYZ groups")
+        if self.single_sensor is None and (
+            not self.internal_columns or not self.external_columns
+        ):
+            raise ValueError("Dual IMU mapping requires both sensors")
+        if self.single_sensor and getattr(
+            self,
+            ("external" if self.single_sensor == "internal" else "internal")
+            + "_columns",
+        ):
+            raise ValueError("Single IMU mapping cannot contain another sensor")
         if self.time_column is None:
             if self.sample_rate_hz is None or self.sample_rate_hz <= 0:
                 raise ValueError("No Time Column requires a positive fixed Sample Rate")

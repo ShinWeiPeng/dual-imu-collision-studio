@@ -54,6 +54,7 @@
           "src/dual_imu_collision_studio/domain/data_workspace/service.py",
           "src/dual_imu_collision_studio/domain/learning/__init__.py",
           "src/dual_imu_collision_studio/domain/learning/contracts.py",
+          "src/dual_imu_collision_studio/domain/learning/deployment.py",
           "src/dual_imu_collision_studio/domain/learning/memory.py",
           "src/dual_imu_collision_studio/domain/learning/mlp.py",
           "src/dual_imu_collision_studio/domain/learning/model.py",

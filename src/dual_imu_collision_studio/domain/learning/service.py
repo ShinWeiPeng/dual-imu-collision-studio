@@ -42,13 +42,60 @@ from dual_imu_collision_studio.domain.learning.model import (
     QualificationResult,
     QualifiedCandidate,
     RecordingQualification,
+    CollisionQualification,
     ReplayEvidence,
     HistoryWorkerProgress,
 )
 from dual_imu_collision_studio.domain.learning.contracts import HistoryExecutionPort
 
 
+from dual_imu_collision_studio.domain.learning.deployment import (
+    COMMON_EVENT_POLICY,
+    DeploymentQualification,
+    deployment_identity,
+    replay_common_events,
+)
+
+
+class _FirFeatureRows:
+    """Owner-private borrowed samples and row indexes; materialize only requested rows."""
+
+    def __init__(self, internal, indexes, taps):
+        self._internal = internal
+        self._indexes = indexes
+        self._taps = taps
+        self.shape = (len(indexes), internal.shape[1] * taps)
+
+    def __len__(self):
+        return len(self._indexes)
+
+    def __getitem__(self, selection):
+        indexes = self._indexes[selection]
+        if np.ndim(indexes) == 0:
+            return np.asarray(
+                type(self)(self._internal, np.atleast_1d(indexes), self._taps)
+            )[0]
+        return type(self)(self._internal, indexes, self._taps)
+
+    def __array__(self, dtype=None, copy=None):
+        if copy is False:
+            raise ValueError("FIR feature rows require materialization")
+        values = np.empty(self.shape, dtype=np.float64 if dtype is None else dtype)
+        for axis in range(self._internal.shape[1]):
+            for lag in range(self._taps):
+                values[:, axis * self._taps + lag] = self._internal[
+                    self._indexes - lag, axis
+                ]
+        return values
+
+
 class LearningService:
+    _FIR_BLOCK_BYTES = 8 * 1024 * 1024
+
+    @classmethod
+    def _fir_block_rows(cls, width):
+        return max(1, cls._FIR_BLOCK_BYTES // (8 * width))
+
     REPLAY_CSV_HEADER = (
         "sample_index",
         "time_s",
@@ -83,7 +130,11 @@ class LearningService:
         return repr(float(value))
 
     def iter_model_text_lines(
-        self, candidate: QualifiedCandidate, *, sample_rate_hz: float
+        self,
+        candidate: QualifiedCandidate,
+        *,
+        sample_rate_hz: float,
+        signal_channels=None,
     ) -> Iterator[str]:
         model = candidate.model
         config = candidate.detector_config
@@ -93,14 +144,37 @@ class LearningService:
             raise ValueError("Model TXT requires a positive finite Sample Rate")
         if isinstance(model, FrozenMlpModel):
             raise ValueError("MLP standalone export is not available in this phase")
-        if model.weights.shape != (3, 3, model.tap_count):
+        if model.weights.shape != (
+            len(model.biases),
+            len(model.biases),
+            model.tap_count,
+        ):
             raise ValueError("frozen FIR weights do not match tap_count")
         vectors = (model.biases, model.residual_centers, model.residual_scales)
-        if any(np.asarray(values).shape != (3,) for values in vectors):
+        if any(np.asarray(values).shape != (len(model.biases),) for values in vectors):
             raise ValueError("frozen model vectors must contain X, Y, and Z")
 
+        channels = (
+            tuple(signal_channels)
+            if signal_channels is not None
+            else (
+                ("ax", "ay", "az")
+                if len(model.biases) == 3
+                else ("ax", "ay", "az", "gx", "gy", "gz")
+            )
+        )
+        if channels not in (
+            ("ax", "ay", "az"),
+            ("gx", "gy", "gz"),
+            ("ax", "ay", "az", "gx", "gy", "gz"),
+        ) or len(channels) != len(model.biases):
+            raise ValueError("Signal identity does not match frozen model dimensions")
+        acceleration_only = channels == ("ax", "ay", "az")
         scalars = (
-            ("schema_version", str(self.MODEL_TEXT_SCHEMA_VERSION)),
+            (
+                "schema_version",
+                str(self.MODEL_TEXT_SCHEMA_VERSION if acceleration_only else 2),
+            ),
             ("kernel_id", candidate.candidate_id),
             ("sample_rate_hz", self._model_number(sample_rate_hz)),
             ("numeric_type", config.numeric_type),
@@ -116,7 +190,7 @@ class LearningService:
         yield "\n"
         yield "[fir_weights]\n"
         yield "output_axis,input_axis,lag,value\n"
-        axes = "XYZ"
+        axes = "XYZ" if acceleration_only else tuple(c.upper() for c in channels)
         for output_axis, output_name in enumerate(axes):
             for input_axis, input_name in enumerate(axes):
                 for lag in range(model.tap_count):
@@ -167,7 +241,10 @@ class LearningService:
         count = len(times)
         if times.ndim != 1:
             raise ValueError("Replay time evidence must contain one value per sample")
-        if any(values.shape != (count, 3) for values in matrices):
+        channels = matrices[0].shape[1] if matrices[0].ndim == 2 else 0
+        if channels not in (3, 6) or any(
+            values.shape != (count, channels) for values in matrices
+        ):
             raise ValueError(
                 "Replay IMU and residual evidence must contain aligned Nx3 samples"
             )
@@ -175,13 +252,29 @@ class LearningService:
             raise ValueError("Replay detector evidence must align with every sample")
 
         triggers = frozenset(evidence.detector_trace.trigger_indices)
-        yield (
-            tuple(
-                name.replace("fir_predicted_", "mlp_predicted_")
-                for name in self.REPLAY_CSV_HEADER
+        header = (
+            self.REPLAY_CSV_HEADER
+            if channels == 3
+            else (
+                ("sample_index", "time_s")
+                + tuple(
+                    prefix + "_" + channel
+                    for prefix in (
+                        "internal_imu",
+                        "actual_external_imu",
+                        "fir_predicted_external_imu",
+                        "residual",
+                        "normalized_residual",
+                    )
+                    for channel in ("ax", "ay", "az", "gx", "gy", "gz")
+                )
+                + self.REPLAY_CSV_HEADER[-5:]
             )
+        )
+        yield (
+            tuple(name.replace("fir_predicted_", "mlp_predicted_") for name in header)
             if evidence.model_family == "mlp"
-            else self.REPLAY_CSV_HEADER
+            else header
         )
         for index in range(count):
             internal, actual, predicted, residual, normalized = (
@@ -209,7 +302,7 @@ class LearningService:
     SCALE_METHODS = ("STD", "MAD")
     ROBUST_K_VALUES = (4, 6, 8)
     SCORE_MODES = ("MAX_ABS", "L2_NORM")
-    CONFIRMATION_MODES = ("1_OF_1", "2_CONSECUTIVE", "2_OF_3")
+    CONFIRMATION_MODES = ("1_OF_1",)
     THRESHOLD_STEP = 0.5
 
     def __init__(
@@ -249,6 +342,59 @@ class LearningService:
             self, dataset, numeric_type, captured.for_run(), progress, cancelled
         )
 
+    def preview_training_batches(self, dataset, numeric_type, settings, cancelled=None):
+        """Yield initial-round fold batches for a pre-training estimate, without fitting."""
+        from itertools import product
+        from dataclasses import replace
+        from .model import FoldJob, ParameterPoint
+
+        stop = cancelled or (lambda: False)
+        if any(
+            getattr(r, "preprocessing", None) is not None for r in dataset.recordings
+        ):
+            return
+        offsets = tuple(sorted({r.collision_offset_mm for r in dataset.recordings}))
+        speeds = tuple(sorted({r.robot_speed_mm_s for r in dataset.recordings}))
+        plan = self.build_cross_validation_plan(
+            dataset, offsets, speeds, fold_count=settings.n_fold
+        )
+        rate = self.validate_dataset(dataset)
+        for family in settings.model_families:
+            selected = replace(settings, model_families=(family,))
+            candidates = self.build_candidate_plan(rate, selected)
+            widths = product(*settings.mlp_layer_widths) if family == "mlp" else [()]
+            fir_jobs = []
+            for layers in widths:
+                for history, alpha in product(
+                    candidates.histories, candidates.ridge_alphas
+                ):
+                    if stop():
+                        raise InterruptedError("Memory preview cancelled")
+                    point = ParameterPoint(history.tap_count, alpha, 0, tuple(layers))
+                    jobs = tuple(
+                        FoldJob(
+                            len(fir_jobs) + i + 1,
+                            point,
+                            fold.fold_index,
+                            tuple(
+                                g
+                                for other in plan.folds
+                                if other.fold_index != fold.fold_index
+                                for g in other.held_out_groups
+                            ),
+                            fold.held_out_groups,
+                            numeric_type,
+                            selected,
+                        )
+                        for i, fold in enumerate(plan.folds)
+                    )
+                    if family == "mlp":
+                        yield family, jobs
+                    else:
+                        fir_jobs.extend(jobs)
+            if fir_jobs:
+                yield family, tuple(fir_jobs)
+
     def maximum_taps(self, rate):
         return math.floor(0.128 * rate) + 1
 
@@ -270,6 +416,7 @@ class LearningService:
             np.asarray(recording.time_s),
             job.config,
             np.asarray(recording.discontinuity_before, dtype=np.bool_),
+            sample_rate_hz=recording.sample_rate_hz,
         )
         return RecordingResult(
             job.job_index,
@@ -391,7 +538,7 @@ class LearningService:
                     model.score_mode,
                     confirmation_mode,
                     float(dtype(threshold)),
-                    float(dtype(0.5)),
+                    float(dtype(0.8)),
                     float(dtype(0.050)),
                 )
                 candidate = self._qualify_model_from_scores(
@@ -542,6 +689,14 @@ class LearningService:
 
     @staticmethod
     def validate_dataset(dataset: LearningDataset) -> float:
+        dimensions = {
+            np.asarray(v).shape[1]
+            for r in dataset.recordings
+            for v in (r.internal_imu, r.external_imu)
+            if v is not None
+        }
+        if len(dimensions) != 1:
+            raise ValueError("Every Learning recording must use the same channel count")
         source_settings = dataset.recordings[0].preprocessing
         if any(r.preprocessing != source_settings for r in dataset.recordings):
             raise ValueError(
@@ -616,17 +771,23 @@ class LearningService:
     @staticmethod
     def target_predict_rows(weights, biases, features, numeric_type):
         dtype = LearningService._target_dtype(numeric_type)
-        x = np.asarray(features, dtype=dtype)
-        result = np.broadcast_to(np.asarray(biases, dtype=dtype), (len(x), 3)).copy()
-        flat = np.asarray(weights, dtype=dtype).reshape(3, -1)
-        # Same input-axis/lag accumulation order and rounding as scalar Replay.
-        for column in range(x.shape[1]):
-            for axis in range(3):
-                result[:, axis] = np.add(
-                    result[:, axis],
-                    np.multiply(x[:, column], flat[axis, column], dtype=dtype),
-                    dtype=dtype,
-                )
+        result = np.broadcast_to(
+            np.asarray(biases, dtype=dtype), (len(features), len(biases))
+        ).copy()
+        flat = np.asarray(weights, dtype=dtype).reshape(len(biases), -1)
+        block_rows = LearningService._fir_block_rows(features.shape[1])
+        # Preserve scalar Replay's input-axis/lag accumulation and target rounding.
+        for start in range(0, len(features), block_rows):
+            end = start + block_rows
+            x = np.asarray(features[start:end], dtype=dtype)
+            block = result[start:end]
+            for column in range(x.shape[1]):
+                for axis in range(len(biases)):
+                    block[:, axis] = np.add(
+                        block[:, axis],
+                        np.multiply(x[:, column], flat[axis, column], dtype=dtype),
+                        dtype=dtype,
+                    )
         if not np.all(np.isfinite(result)):
             raise CandidateNumericalError("Non-finite target prediction")
         return result
@@ -1167,6 +1328,92 @@ class LearningService:
     def round_can_stop(winner: QualifiedCandidate) -> bool:
         return winner.training_speeds == winner.passing_speeds
 
+    def requalify_model(
+        self,
+        dataset: LearningDataset,
+        candidate: QualifiedCandidate,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> DeploymentQualification:
+        """Requalify the original frozen coverage; never train or alter history."""
+        self.validate_dataset(dataset)
+        model, config = candidate.model, candidate.detector_config
+        if not isinstance(model, (FrozenFirModel, FrozenMlpModel)) or config is None:
+            raise ValueError("Qualification requires a supported frozen model")
+        if not candidate.passing_speeds or not candidate.active_offsets:
+            raise ValueError(
+                "Deployment requires qualified 1_OF_1 speed/offset coverage"
+            )
+        if config.score_mode != model.score_mode:
+            raise ValueError("Frozen model and detector Score Mode must match")
+        identity = deployment_identity(dataset, candidate)
+        deployment_config = replace(
+            config,
+            confirmation_mode="1_OF_1",
+            release_ratio=0.8,
+            release_quiet_time_s=0.050,
+        )
+        scores, metrics = [], []
+        for recording in dataset.recordings:
+            if cancelled is not None and cancelled():
+                raise InterruptedError("Deployment validation cancelled")
+            score = self._qualification_score_cache(
+                LearningDataset((recording,)), model, config.numeric_type
+            )[0]
+            trace = replay_common_events(
+                score,
+                recording.time_s,
+                deployment_config,
+                recording.discontinuity_before,
+                sample_rate_hz=recording.sample_rate_hz,
+                cancelled=cancelled,
+            )
+            scores.append(score)
+            metrics.append(
+                self._recording_qualification(recording, trace, config.threshold)
+            )
+        if cancelled is not None and cancelled():
+            raise InterruptedError("Deployment validation cancelled")
+        result = self._qualify_model_from_scores(
+            dataset,
+            model,
+            deployment_config,
+            tuple(scores),
+            training_speeds=candidate.training_speeds,
+            active_offsets=candidate.active_offsets,
+            candidate_id=candidate.candidate_id,
+            stable_order=candidate.stable_order,
+            recording_metrics=metrics,
+        )
+        result = replace(
+            result,
+            model=model,
+            history=candidate.history,
+            detector_config=deployment_config,
+            active_offsets=candidate.active_offsets,
+            excluded_offsets=candidate.excluded_offsets,
+        )
+        required = {
+            (speed, offset)
+            for speed in candidate.passing_speeds
+            for offset in candidate.active_offsets
+        }
+        passed_conditions = {
+            (row.robot_speed_mm_s, row.collision_offset_mm)
+            for row in result.conditions
+            if row.status == "PASS"
+        }
+        passed = required.issubset(passed_conditions) and set(
+            candidate.passing_speeds
+        ).issubset(result.passing_speeds)
+        reason = (
+            "Original qualified coverage passes common 0.8 / 50 ms policy."
+            if passed
+            else "Common policy failed original Qualification coverage; review source events and revalidate."
+        )
+        return DeploymentQualification(
+            identity, COMMON_EVENT_POLICY, result, passed, reason
+        )
+
     def qualify_model(
         self,
         dataset: LearningDataset,
@@ -1244,6 +1491,7 @@ class LearningService:
                     np.asarray(recording.time_s),
                     config,
                     np.asarray(recording.discontinuity_before, dtype=np.bool_),
+                    sample_rate_hz=recording.sample_rate_hz,
                 )
                 metrics = self._recording_qualification(
                     recording, trace, config.threshold
@@ -1359,6 +1607,7 @@ class LearningService:
             if diagnostic_latencies
             else None,
             recording_qualifications=tuple(per_recording),
+            qualification_policy=COMMON_EVENT_POLICY,
         )
 
     @staticmethod
@@ -1405,6 +1654,13 @@ class LearningService:
             finite_latency,
             status,
             tuple(metrics["collision_snrs_db"]),
+            tuple(metrics["collisions"]),
+            float(metrics["false_margin"])
+            if np.isfinite(metrics["false_margin"])
+            else None,
+            float(metrics["collision_margin"])
+            if np.isfinite(metrics["collision_margin"])
+            else None,
         )
 
     @staticmethod
@@ -1546,6 +1802,9 @@ class LearningService:
             else None
         )
         collision_snrs_db: list[float | None] = []
+        snr_reasons: list[str] = []
+        response_available: list[bool] = []
+        collision_details: list[CollisionQualification] = []
         coverage_gap = False
         collisions = sorted(
             (
@@ -1575,6 +1834,7 @@ class LearningService:
                 or recording.training_eligible is not None
             ) and not response_scores:
                 coverage_gap = True
+            response_available.append(bool(response_scores))
             signal_peak = max(response_scores) if response_scores else None
             if (
                 signal_peak is None
@@ -1585,9 +1845,21 @@ class LearningService:
                 or noise_rms <= 0.0
             ):
                 collision_snrs_db.append(None)
+                snr_reasons.append(
+                    "no-finite-response"
+                    if signal_peak is None
+                    else "noise-rms-unavailable"
+                    if noise_rms is None
+                    else "signal-peak-not-positive"
+                    if signal_peak <= 0.0
+                    else "noise-rms-not-positive"
+                    if noise_rms <= 0.0
+                    else "nonfinite-snr-input"
+                )
                 continue
             snr_db = 20.0 * math.log10(signal_peak / noise_rms)
             collision_snrs_db.append(snr_db if math.isfinite(snr_db) else None)
+            snr_reasons.append("" if math.isfinite(snr_db) else "nonfinite-snr-ratio")
         false_class[ignore_mask | collision_acceptance] = 0
         valid_cycles = {
             interval.cycle_index
@@ -1612,6 +1884,9 @@ class LearningService:
                 and bool(collision_acceptance[index])
                 and not bool(ignore_mask[index])
             ]
+            trigger = None
+            latency_ms = None
+            margin = None
             if eligible:
                 trigger = eligible[0]
                 detected += 1
@@ -1622,7 +1897,31 @@ class LearningService:
                 ):
                     latency_ms = LearningService.COLLISION_DETECTION_WINDOW_MS
                 latencies.append(latency_ms)
-                collision_margins.append(float(trace.scores[trigger]) - threshold)
+                margin = float(trace.scores[trigger]) - threshold
+                collision_margins.append(margin)
+            ordinal = collisions.index(interval)
+            collision_details.append(
+                CollisionQualification(
+                    recording.recording_id,
+                    ordinal,
+                    interval.start_index,
+                    interval.end_index,
+                    trigger is not None,
+                    trigger,
+                    float(times[trigger]) if trigger is not None else None,
+                    latency_ms,
+                    margin,
+                    collision_snrs_db[ordinal],
+                    ""
+                    if trigger is not None
+                    else (
+                        "no-trigger-within-150ms"
+                        if response_available[ordinal]
+                        else "no-finite-response"
+                    ),
+                    snr_reasons[ordinal],
+                )
+            )
         for index in triggers:
             category = int(false_class[index])
             if category == 1:
@@ -1655,6 +1954,9 @@ class LearningService:
             "false_margin": false_margin,
             "collision_margin": collision_margin,
             "collision_snrs_db": tuple(collision_snrs_db),
+            "collisions": tuple(
+                sorted(collision_details, key=lambda row: row.collision_index)
+            ),
         }
 
     @staticmethod
@@ -1737,9 +2039,9 @@ class LearningService:
         internal = np.asarray(recording.internal_imu, dtype=dtype)
         external = np.asarray(recording.external_imu, dtype=dtype)
         count = len(internal)
-        predicted_external = np.empty((count, 3), dtype=dtype)
-        residual_values = np.empty((count, 3), dtype=dtype)
-        normalized = np.empty((count, 3), dtype=dtype)
+        predicted_external = np.empty((count, len(model.biases)), dtype=dtype)
+        residual_values = np.empty((count, len(model.biases)), dtype=dtype)
+        normalized = np.empty((count, len(model.biases)), dtype=dtype)
         reset_before = np.asarray(recording.discontinuity_before, dtype=np.bool_).copy()
         if count:
             reset_before[0] = True
@@ -1747,9 +2049,9 @@ class LearningService:
         for index in range(count):
             if reset_before[index]:
                 segment_start = index
-            for output_axis in range(3):
+            for output_axis in range(len(model.biases)):
                 predicted = dtype(model.biases[output_axis])
-                for input_axis in range(3):
+                for input_axis in range(internal.shape[1]):
                     for lag in range(model.tap_count):
                         product = dtype(
                             dtype(model.weights[output_axis, input_axis, lag])
@@ -1826,7 +2128,11 @@ class LearningService:
             candidate.detector_config.numeric_type,
         )
         trace = self.replay_detector(
-            normalized, times, candidate.detector_config, reset_before
+            normalized,
+            times,
+            replace(candidate.detector_config, confirmation_mode="1_OF_1"),
+            reset_before,
+            sample_rate_hz=recording.sample_rate_hz,
         )
         latency: float | None = None
         if event is not None and event.kind == "Robot Fork Collision":
@@ -1880,8 +2186,8 @@ class LearningService:
         robust_k: int,
         score_mode: str,
     ) -> FrozenFirModel:
-        matrix = FirMatrixEvidence(
-            *self._fir_rows(internal_imu, external_imu, segment_ids, tap_count)
+        matrix = self._prepare_fir_matrix(
+            FitEvidence(internal_imu, external_imu, segment_ids, 0, 0), tap_count
         )
         return self._fit_mimo_fir_matrix(
             matrix, tap_count, alpha, scale_method, robust_k, score_mode
@@ -1891,13 +2197,14 @@ class LearningService:
     def _prepare_fir_matrix(
         cls, evidence: FitEvidence, tap_count: int
     ) -> FirMatrixEvidence:
+        internal, external, indexes = cls._fir_inputs(
+            evidence.internal_imu,
+            evidence.external_imu,
+            evidence.segment_ids,
+            tap_count,
+        )
         return FirMatrixEvidence(
-            *cls._fir_rows(
-                evidence.internal_imu,
-                evidence.external_imu,
-                evidence.segment_ids,
-                tap_count,
-            )
+            _FirFeatureRows(internal, indexes, tap_count), external[indexes], indexes
         )
 
     def _fit_mimo_fir_matrix(
@@ -1912,7 +2219,7 @@ class LearningService:
         use_robust_refit: bool = True,
         numeric_type: str | None = None,
     ) -> FrozenFirModel:
-        features = np.asarray(matrix.features)
+        features = matrix.features
         targets = np.asarray(matrix.targets)
         row_indexes = np.asarray(matrix.row_indexes)
         if len(features) == 0:
@@ -1926,28 +2233,20 @@ class LearningService:
             scores = self._score_rows(normalized, score_mode)
             median = float(np.median(scores))
             cutoff = median + robust_k * float(np.median(np.abs(scores - median)))
-            seeded_samples = set(
-                int(row_indexes[index]) for index in np.flatnonzero(scores > cutoff)
-            )
-            affected = np.asarray(
-                [
-                    any(
-                        sample in seeded_samples
-                        for sample in range(int(row) - tap_count + 1, int(row) + 1)
-                    )
-                    for row in row_indexes
-                ],
-                dtype=np.bool_,
+            seeded_samples = row_indexes[scores > cutoff]
+            affected = np.searchsorted(
+                seeded_samples, row_indexes, side="right"
+            ) > np.searchsorted(
+                seeded_samples, row_indexes - tap_count + 1, side="left"
             )
             maximum_rejections = int(np.floor(0.05 * len(features)))
             affected_indexes = np.flatnonzero(affected)
             if len(affected_indexes) > maximum_rejections:
-                stable_worst = sorted(
-                    affected_indexes.tolist(),
-                    key=lambda index: (-float(scores[index]), int(row_indexes[index])),
+                order = np.lexsort(
+                    (row_indexes[affected_indexes], -scores[affected_indexes])
                 )
                 affected[:] = False
-                affected[stable_worst[:maximum_rejections]] = True
+                affected[affected_indexes[order[:maximum_rejections]]] = True
             retained = ~affected
             if not retained.any():
                 raise ValueError("robust refit has no eligible rows")
@@ -1997,90 +2296,120 @@ class LearningService:
     def predict_mimo_fir(
         cls, model: FrozenFirModel, internal_imu: np.ndarray, segment_ids: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        dummy = np.zeros((len(internal_imu), 3), dtype=np.float64)
-        features, _, row_indexes = cls._fir_rows(
-            internal_imu, dummy, segment_ids, model.tap_count
+        dummy = np.zeros_like(internal_imu, dtype=np.float64)
+        matrix = cls._prepare_fir_matrix(
+            FitEvidence(internal_imu, dummy, segment_ids, 0, 0), model.tap_count
         )
-        return cls._predict_rows(model.weights, model.biases, features), row_indexes
+        return cls._predict_rows(
+            model.weights, model.biases, matrix.features
+        ), matrix.row_indexes
 
     @staticmethod
-    def _fir_rows(
-        internal_imu: np.ndarray,
-        external_imu: np.ndarray,
-        segment_ids: np.ndarray,
-        tap_count: int,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def _fir_inputs(internal_imu, external_imu, segment_ids, tap_count):
         internal = np.asarray(internal_imu, dtype=np.float64)
         external = np.asarray(external_imu, dtype=np.float64)
         segments = np.asarray(segment_ids)
         if (
             internal.ndim != 2
-            or internal.shape[1] != 3
+            or internal.shape[1] not in (3, 6)
             or external.shape != internal.shape
         ):
             raise ValueError(
-                "Internal and External IMU arrays must have matching Nx3 shape"
+                "Internal and External IMU arrays must have matching Nx3 or Nx6 shape"
             )
         if len(segments) != len(internal) or tap_count < 1:
             raise ValueError("segment_ids and positive tap_count are required")
-        features: list[list[float]] = []
-        targets: list[np.ndarray] = []
-        indexes: list[int] = []
-        for row in range(tap_count - 1, len(internal)):
-            support = slice(row - tap_count + 1, row + 1)
-            if np.any(segments[support] != segments[row]):
-                continue
-            values = [
-                internal[row - lag, axis]
-                for axis in range(3)
-                for lag in range(tap_count)
-            ]
-            if not np.all(np.isfinite(values)) or not np.all(
-                np.isfinite(external[row])
-            ):
-                continue
-            features.append(values)
-            targets.append(external[row])
-            indexes.append(row)
-        return (
-            np.asarray(features),
-            np.asarray(targets),
-            np.asarray(indexes, dtype=np.int64),
+        count = len(internal)
+        if count < tap_count:
+            return internal, external, np.empty(0, dtype=np.int64)
+        rows = np.arange(count, dtype=np.int64)
+        starts = np.maximum.accumulate(
+            np.where(np.r_[True, segments[1:] != segments[:-1]], rows, 0)
         )
+        # A prefix count checks all lag samples without constructing their matrix.
+        invalid = np.r_[
+            0, np.cumsum(~np.all(np.isfinite(internal), axis=1), dtype=np.int64)
+        ]
+        support_starts = np.maximum(0, rows - tap_count + 1)
+        valid = (rows - starts >= tap_count - 1) & (
+            invalid[rows + 1] == invalid[support_starts]
+        )
+        valid &= np.all(np.isfinite(external), axis=1)
+        return internal, external, rows[valid]
 
-    @staticmethod
-    def _ridge_source_scale(
-        features: np.ndarray, targets: np.ndarray, tap_count: int, alpha: float
-    ) -> tuple[np.ndarray, np.ndarray]:
+    @classmethod
+    def _fir_rows(cls, internal_imu, external_imu, segment_ids, tap_count):
+        internal, external, indexes = cls._fir_inputs(
+            internal_imu, external_imu, segment_ids, tap_count
+        )
+        if not len(indexes):
+            return np.asarray([]), np.asarray([]), indexes
+        # Dense compatibility for explicit matrix consumers, including MLP.
+        features = np.empty(
+            (len(indexes), internal.shape[1] * tap_count), dtype=np.float64
+        )
+        rows = _FirFeatureRows(internal, indexes, tap_count)
+        block_rows = cls._fir_block_rows(features.shape[1])
+        for start in range(0, len(rows), block_rows):
+            features[start : start + block_rows] = np.asarray(
+                rows[start : start + block_rows]
+            )
+        return features, external[indexes], indexes
+
+    @classmethod
+    def _ridge_source_scale(cls, features, targets, tap_count, alpha):
         if not math.isfinite(alpha) or not 1e-6 <= alpha <= 100:
             raise ValueError("Ridge alpha is outside [1e-6, 100]")
-        feature_mean = np.mean(features, axis=0)
-        feature_scale = np.std(features, axis=0, ddof=0)
-        if np.any(
-            feature_scale
-            <= 64
-            * np.finfo(np.float64).eps
-            * np.maximum(1.0, np.max(np.abs(features), axis=0))
-        ):
-            raise CandidateNumericalError("degenerate FIR input feature scale")
-        standardized = (features - feature_mean) / feature_scale
-        target_mean = np.mean(targets, axis=0)
-        count = len(features)
-        normal = standardized.T @ standardized / count + alpha * np.eye(
-            standardized.shape[1]
+        count, width = features.shape
+        block_rows = cls._fir_block_rows(width)
+        feature_mean = np.zeros(width, dtype=np.float64)
+        maximum = np.zeros(width, dtype=np.float64)
+        for start in range(0, count, block_rows):
+            x = np.asarray(features[start : start + block_rows], dtype=np.float64)
+            feature_mean += np.sum(x, axis=0)
+            maximum = np.maximum(maximum, np.max(np.abs(x), axis=0))
+        feature_mean /= count
+        variance = np.zeros(width, dtype=np.float64)
+        for start in range(0, count, block_rows):
+            x = np.array(
+                features[start : start + block_rows], dtype=np.float64, copy=True
+            )
+            x -= feature_mean
+            variance += np.sum(x * x, axis=0)
+        feature_scale = np.sqrt(variance / count)
+        degenerate = feature_scale <= 64 * np.finfo(np.float64).eps * np.maximum(
+            1.0, maximum
         )
-        rhs = standardized.T @ (targets - target_mean) / count
+        feature_scale[degenerate] = 1.0
+        target_mean = np.mean(targets, axis=0)
+        normal = np.zeros((width, width), dtype=np.float64)
+        rhs = np.zeros((width, targets.shape[1]), dtype=np.float64)
+        for start in range(0, count, block_rows):
+            end = start + block_rows
+            x = np.array(features[start:end], dtype=np.float64, copy=True)
+            x -= feature_mean
+            x /= feature_scale
+            normal += x.T @ x
+            rhs += x.T @ (targets[start:end] - target_mean)
+        normal /= count
+        normal.flat[:: width + 1] += alpha
+        rhs /= count
         standardized_weights = np.linalg.solve(normal, rhs)
         source_weights_flat = standardized_weights / feature_scale[:, None]
         biases = target_mean - feature_mean @ source_weights_flat
-        weights = source_weights_flat.T.reshape(3, 3, tap_count)
-        return weights, biases
+        return source_weights_flat.T.reshape(
+            targets.shape[1], width // tap_count, tap_count
+        ), biases
 
-    @staticmethod
-    def _predict_rows(
-        weights: np.ndarray, biases: np.ndarray, features: np.ndarray
-    ) -> np.ndarray:
-        return features @ weights.reshape(3, -1).T + biases
+    @classmethod
+    def _predict_rows(cls, weights, biases, features):
+        predictions = np.empty((len(features), len(biases)), dtype=np.float64)
+        block_rows = cls._fir_block_rows(features.shape[1])
+        flat = weights.reshape(len(biases), -1).T
+        for start in range(0, len(features), block_rows):
+            end = start + block_rows
+            predictions[start:end] = np.asarray(features[start:end]) @ flat + biases
+        return predictions
 
     @staticmethod
     def _residual_scale(
@@ -2099,12 +2428,9 @@ class LearningService:
             * np.finfo(np.float64).eps
             * np.maximum(1.0, np.max(np.abs(residual), axis=0))
         )
-        if (
-            not np.all(np.isfinite(centers))
-            or not np.all(np.isfinite(scales))
-            or np.any(scales <= limit)
-        ):
+        if not np.all(np.isfinite(centers)) or not np.all(np.isfinite(scales)):
             raise CandidateNumericalError("degenerate residual scale")
+        scales = np.where(scales <= limit, 1.0, scales)
         return centers, scales
 
     @staticmethod
@@ -2164,16 +2490,24 @@ class LearningService:
         time_s: np.ndarray,
         config: DetectorConfig,
         reset_before: np.ndarray | None = None,
+        *,
+        sample_rate_hz: float | None = None,
     ) -> DetectorTrace:
         dtype = self._target_dtype(config.numeric_type)
         residual = np.asarray(normalized_residual, dtype=dtype)
         times = np.asarray(time_s, dtype=np.float64)
-        if residual.ndim != 2 or residual.shape[1] != 3 or len(residual) != len(times):
+        if (
+            residual.ndim != 2
+            or residual.shape[1] not in (3, 6)
+            or len(residual) != len(times)
+        ):
             raise ValueError(
                 "normalized residual and time arrays must contain matching Nx3 samples"
             )
         scores = self._detector_scores(residual, config.score_mode, config.numeric_type)
-        return self._replay_scores(scores, times, config, reset_before)
+        return self._replay_scores(
+            scores, times, config, reset_before, sample_rate_hz=sample_rate_hz
+        )
 
     def _detector_scores(
         self,
@@ -2183,7 +2517,7 @@ class LearningService:
     ) -> np.ndarray:
         dtype = self._target_dtype(numeric_type)
         residual = np.asarray(normalized_residual, dtype=dtype)
-        if residual.ndim != 2 or residual.shape[1] != 3:
+        if residual.ndim != 2 or residual.shape[1] not in (3, 6):
             raise ValueError("normalized residual must contain Nx3 samples")
         scores = np.empty(len(residual), dtype=dtype)
         for index, axes in enumerate(residual):
@@ -2196,79 +2530,15 @@ class LearningService:
         time_s: np.ndarray,
         config: DetectorConfig,
         reset_before: np.ndarray | None = None,
+        *,
+        sample_rate_hz: float | None = None,
     ) -> DetectorTrace:
-        dtype = self._target_dtype(config.numeric_type)
-        scores = np.asarray(detector_scores, dtype=dtype)
-        times = np.asarray(time_s, dtype=np.float64)
-        if scores.ndim != 1 or len(scores) != len(times):
-            raise ValueError(
-                "detector scores and time arrays must have matching lengths"
-            )
-        resets = (
-            np.zeros(len(times), dtype=np.bool_)
-            if reset_before is None
-            else np.asarray(reset_before, dtype=np.bool_)
-        )
-        if resets.shape != (len(times),):
-            raise ValueError("reset markers must match replay samples")
-        if config.threshold <= 0 or config.release_ratio <= 0:
-            raise ValueError("detector thresholds must be greater than zero")
-        target_threshold = dtype(config.threshold)
-        release_threshold = dtype(dtype(config.threshold) * dtype(config.release_ratio))
-        ratio = np.empty_like(scores)
-        for index, score in enumerate(scores):
-            ratio[index] = dtype(score / target_threshold)
-
-        armed = True
-        quiet_since: float | None = None
-        confirmation: list[bool] = []
-        states: list[str] = []
-        trigger_indices: list[int] = []
-        for index, score in enumerate(scores):
-            if resets[index]:
-                armed = True
-                confirmation.clear()
-                quiet_since = None
-            if not np.isfinite(score) or not np.isfinite(times[index]):
-                confirmation.clear()
-                quiet_since = None
-                states.append("INVALID")
-                continue
-            if not armed:
-                if score < release_threshold:
-                    if quiet_since is None:
-                        quiet_since = float(times[index])
-                    elapsed = float(times[index]) - quiet_since
-                    time_tolerance = (
-                        8.0
-                        * np.finfo(np.float64).eps
-                        * max(1.0, abs(float(times[index])))
-                    )
-                    if elapsed + time_tolerance >= config.release_quiet_time_s:
-                        armed = True
-                        confirmation.clear()
-                        quiet_since = None
-                else:
-                    quiet_since = None
-                states.append("ARMED" if armed else "LATCHED")
-                continue
-            confirmation.append(bool(score > target_threshold))
-            if len(confirmation) > 3:
-                confirmation.pop(0)
-            if self._confirmation_complete(confirmation, config.confirmation_mode):
-                trigger_indices.append(index)
-                armed = False
-                confirmation.clear()
-                quiet_since = None
-                states.append("TRIGGERED")
-            else:
-                states.append("ARMED")
-        return DetectorTrace(
-            scores=scores,
-            collision_ratio=ratio,
-            states=tuple(states),
-            trigger_indices=tuple(trigger_indices),
-            trigger_times_s=tuple(float(times[index]) for index in trigger_indices),
+        return replay_common_events(
+            detector_scores,
+            time_s,
+            replace(config, confirmation_mode="1_OF_1"),
+            reset_before,
+            sample_rate_hz=sample_rate_hz,
         )
 
     @staticmethod
@@ -2289,12 +2559,10 @@ class LearningService:
                     winner = value
             return winner
         if mode == "L2_NORM":
-            x2 = dtype(dtype(axes[0]) * dtype(axes[0]))
-            y2 = dtype(dtype(axes[1]) * dtype(axes[1]))
-            z2 = dtype(dtype(axes[2]) * dtype(axes[2]))
-            xy = dtype(x2 + y2)
-            xyz = dtype(xy + z2)
-            return dtype(np.sqrt(xyz, dtype=dtype))
+            squared = dtype(dtype(axes[0]) * dtype(axes[0]))
+            for axis in axes[1:]:
+                squared = dtype(squared + dtype(dtype(axis) * dtype(axis)))
+            return dtype(np.sqrt(squared, dtype=dtype))
         raise ValueError("Score Mode must be MAX_ABS or L2_NORM")
 
     @staticmethod

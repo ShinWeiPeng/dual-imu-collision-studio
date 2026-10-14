@@ -1,0 +1,52 @@
+format_version: 1
+canonical: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+sections:
+- section: Problem
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Solution
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: User Stories
+  path: specs/SPEC-0041/requirements.md
+- section: Requirements
+  path: specs/SPEC-0041/requirements.md
+- section: Decisions
+  path: specs/SPEC-0041/discussion.md
+- section: Acceptance Criteria
+  path: specs/SPEC-0041/acceptance.md
+- section: Relationships
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Out of Scope
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Open Decisions
+  path: specs/SPEC-0041/discussion.md
+- section: Discussion Context
+  path: specs/SPEC-0041/discussion.md
+- section: Acceptance Mapping
+  path: specs/SPEC-0041/acceptance.md
+- section: Architecture Impact
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Validation Plan
+  path: specs/SPEC-0041/acceptance.md
+- section: Revision History
+  path: specs/SPEC-0041/discussion.md
+- section: Routing/Gates
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Current Specification
+  path: specs/SPEC-0041-accelerometer-gyroscope-joint-training.md
+- section: Decision History
+  path: specs/SPEC-0041/discussion.md
+- section: Pending Discussion
+  path: specs/SPEC-0041/discussion.md
+- section: Completeness Gaps
+  path: specs/SPEC-0041/discussion.md
+- section: Discussion History
+  path: specs/SPEC-0041/discussion.md
+designs:
+- id: CAT-types
+  version: 2
+  path: specs/SPEC-0041/candidates/CAT-types-v2-1bfa86934452230c.md
+  sha256: 1bfa86934452230c4a2e0da31e1ba9acb668817b55e5e0d82383332dcd6927da
+- id: BASE-CAT-types
+  version: 2
+  path: specs/SPEC-0041/candidates/BASE-CAT-types-v2-87817e501d5c47b3.md
+  sha256: 87817e501d5c47b388f0f746ad91e1d74b68a133b69836ed462a641b61f7e9b6

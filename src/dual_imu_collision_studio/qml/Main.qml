@@ -37,11 +37,24 @@ ApplicationWindow {
     function saveJsonExport(replace) {
         let result = studio.exportJsonModel(jsonExportCurrent.kernelId,
             jsonExportCurrent.modelName, jsonExportTarget, replace)
+        if (result === "started") return
         if (result === "exists") jsonReplaceDialog.open()
         else if (result === "saved") nextJsonExport()
         else {
             jsonExportError = studio.statusMessage
             jsonNameDialog.open()
+        }
+    }
+
+    Connections {
+        target: studio
+        function onJsonExportFinished(result) {
+            if (result === "exists") jsonReplaceDialog.open()
+            else if (result === "saved") window.nextJsonExport()
+            else {
+                window.jsonExportError = studio.statusMessage
+                jsonNameDialog.open()
+            }
         }
     }
 
@@ -366,6 +379,10 @@ ApplicationWindow {
     }
 
     onClosing: close => {
+        if (studio.jsonExportActive || studio.qualificationValidationActive) {
+            close.accepted = false
+            return
+        }
         if (studio.projectDirty && !window.allowProjectClose) {
             close.accepted = false
             window.requestProjectTransition("close", "")
@@ -832,6 +849,12 @@ ApplicationWindow {
         property string interactionObjectName
         property string intervalObjectPrefix
         property string sourceName
+        property var signalKinds: {
+            let value = studio.selectedSignalMapping[sourceName === "internal_imu" ? "internal" : "external"] || ({})
+            let names = value.accelerometer_enabled !== false ? ["Accelerometer"] : []
+            if (value.gyroscope) names.push("Gyroscope")
+            return names
+        }
         property var intervals
         property string activeTool: "Select / Edit"
         property real viewportStart: 0.0
@@ -854,7 +877,7 @@ ApplicationWindow {
         }
         function refreshWaveformProjection() {
             waveformItem.projectionProperty = studio.waveformViewport(
-                sourceName,
+                sourceName + ":" + (signalSelector.currentText === "Gyroscope" ? "gyroscope" : "accelerometer"),
                 viewportStart,
                 viewportEnd,
                 Math.max(1, Math.floor(plotArea.width)))
@@ -868,6 +891,7 @@ ApplicationWindow {
             function onStateChanged() { Qt.callLater(wavePanel.refreshWaveformProjection) }
         }
         color: "#FBFCFE"; border.color: DesignTokens.border; radius: 6
+        ComboBox { id:signalSelector; objectName:waveformObjectName + "SignalGroup"; x:125; y:1; width:145; height:26; model:wavePanel.signalKinds; onCurrentIndexChanged:Qt.callLater(wavePanel.refreshWaveformProjection) }
         Label { x: 10; y: 7; text: titleText; font.bold: true; font.pixelSize: 11; color: DesignTokens.text }
         Row { anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 7; spacing: 8
             Label { text: "X"; color: "#1769E0"; font.bold: true } Label { text: "Y"; color: "#D14343"; font.bold: true } Label { text: "Z"; color: "#168567"; font.bold: true }
@@ -1297,7 +1321,7 @@ ApplicationWindow {
                     }
                 }
             }
-            Card { objectName: "candidateDashboardCard"; Layout.fillWidth: true; Layout.preferredHeight: 520; Layout.minimumHeight: 520
+            Card { objectName: "candidateDashboardCard"; Layout.fillWidth: true; Layout.preferredHeight: 680; Layout.minimumHeight: 520
                 ColumnLayout { anchors.fill: parent; anchors.margins: 16; spacing: 12
                     RowLayout { Layout.fillWidth: true
                         ColumnLayout {
@@ -1314,6 +1338,17 @@ ApplicationWindow {
                             enabled: studio.canStartLearning || (active && studio.runState !== "Cancelling")
                             onClicked: active ? studio.cancelLearning() : studio.startLearning()
                         }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: "FIR / MLP Training workers" }
+                        SpinBox {
+                            objectName: "trainingWorkerCount"
+                            from: 1; to: 8; value: studio.trainingWorkerCount
+                            enabled: !studio.learningSettingsLocked
+                            onValueModified: studio.setTrainingWorkers(value)
+                        }
+                        Item { Layout.fillWidth: true }
                     }
                     ProgressBar { Layout.fillWidth: true; from: 0; to: 1; value: studio.progress }
                     RowLayout {
@@ -1332,13 +1367,25 @@ ApplicationWindow {
                     }
                     Label { objectName: "trainingFallbackSummary"; text: studio.trainingFallbackSummary; color: DesignTokens.textMuted; font.pixelSize: 11; wrapMode: Text.Wrap; Layout.fillWidth: true }
                     Label { objectName: "trainingCurrentSummary"; text: studio.trainingCurrentSummary; color: DesignTokens.text; font.pixelSize: 12; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                    Rectangle {
+                    ColumnLayout {
                         objectName: "trainingFailureReason"
                         visible: studio.runFailureReason !== ""
                         Layout.fillWidth: true
-                        implicitHeight: failureText.implicitHeight + 16
-                        color: "#FCEBEC"; border.color: "#D96B72"; radius: 5
-                        Label { id: failureText; anchors.fill: parent; anchors.margins: 8; text: "Failure reason: " + studio.runFailureReason; color: "#9B2630"; wrapMode: Text.Wrap }
+                        Label {
+                            Layout.fillWidth: true
+                            text: "Failure reason: " + studio.runFailureReason.split("\n")[0]
+                            color: "#9B2630"; wrapMode: Text.Wrap
+                            maximumLineCount: 4; elide: Text.ElideRight
+                        }
+                        RowLayout {
+                            CheckBox { id: failureDetails; objectName: "trainingFailureDetailsToggle"; text: "Show details" }
+                            PaddedButton { text: "Copy details"; onClicked: studio.copyTrainingFailureDetails() }
+                        }
+                        ScrollView {
+                            visible: failureDetails.checked
+                            Layout.fillWidth: true; Layout.preferredHeight: 110
+                            TextArea { text: studio.runFailureReason; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap }
+                        }
                     }
                     Rectangle {
                         id: trainingExecutionLog
@@ -1458,6 +1505,16 @@ ApplicationWindow {
                         }
                         Item { Layout.fillWidth: true }
                     }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { objectName: "qualificationPolicyStatus"; text: studio.selectedQualificationStatus; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                        PaddedButton {
+                            objectName: "requalifySelectedKernel"
+                            text: studio.qualificationValidationActive ? "Cancel Qualification" : "Run Qualification"
+                            enabled: !studio.jsonExportActive && !studio.learningSettingsLocked && studio.resultKernels.length > 0
+                            onClicked: studio.qualificationValidationActive ? studio.cancelQualification() : studio.requalifySelected()
+                        }
+                    }
                     Label { objectName:"selectedResultSource"; text:studio.selectedResultSource; visible:text.length>0; Layout.fillWidth:true; wrapMode:Text.Wrap; color:DesignTokens.text }
                     Label { visible: studio.resultKernels.length === 0; text: "One winner from every completed Offset / Speed fallback round will appear here."; color: DesignTokens.textMuted }
                     Rectangle {
@@ -1571,7 +1628,7 @@ ApplicationWindow {
                 Layout.fillWidth: true
                 SectionTitle {
                     heading: "Export Profile"
-                    supporting: "Choose a qualified kernel to export as JSON. Each file contains one model and its frozen execution settings."
+                    supporting: "Export models qualified with the common 0.8 / 50 ms event policy. Requalify historical models in Replay & Qualify."
                     Layout.fillWidth: true
                 }
                 Tag { label: studio.jsonExportKernels.length + " qualified"; tagColor: "#E4F4EE" }
@@ -1586,7 +1643,7 @@ ApplicationWindow {
                         Label { text: "History / taps"; font.bold: true; Layout.preferredWidth: 180 }
                         Label { text: "Threshold"; font.bold: true; Layout.preferredWidth: 130 }
                         Label { text: "Qualified range (mm/s)"; font.bold: true; Layout.fillWidth: true }
-                        Item { Layout.preferredWidth: 140 }
+                        Item { Layout.preferredWidth: 170 }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: DesignTokens.border }
                     ListView {
@@ -1615,14 +1672,17 @@ ApplicationWindow {
                                     Label { text: modelData.qualifiedRange; Layout.fillWidth: true; wrapMode: Text.Wrap }
                                     Label { text: modelData.exportReason; visible: text.length > 0; Layout.fillWidth: true; wrapMode: Text.Wrap; color: DesignTokens.warning; font.pixelSize: 11 }
                                 }
-                                PaddedButton {
-                                    objectName: "exportJson_" + modelData.kernelId
-                                    text: "Export JSON…"; highlighted: true
-                                    Layout.preferredWidth: 140
-                                    enabled: modelData.exportable
-                                    onClicked: {
-                                        window.jsonExportQueue = studio.prepareJsonExport(modelData.kernelId)
-                                        window.nextJsonExport()
+                                ColumnLayout {
+                                    Layout.preferredWidth: 170; spacing: 4
+                                    PaddedButton {
+                                        objectName: "exportJson_" + modelData.kernelId
+                                        text: studio.jsonExportActive && studio.jsonExportKernel === modelData.kernelId ? "Exporting…" : "Export JSON"; highlighted: true
+                                        Layout.fillWidth: true
+                                        enabled: modelData.exportable && !studio.jsonExportActive && !studio.qualificationValidationActive
+                                        onClicked: {
+                                            window.jsonExportQueue = studio.prepareJsonExport(modelData.kernelId)
+                                            window.nextJsonExport()
+                                        }
                                     }
                                 }
                             }
@@ -1631,7 +1691,7 @@ ApplicationWindow {
                             anchors.centerIn: parent; width: Math.min(440, parent.width)
                             visible: jsonKernelList.count === 0; spacing: 12
                             Label { text: "No qualified kernels"; font.bold: true; font.pixelSize: 18; Layout.alignment: Qt.AlignHCenter }
-                            Label { text: "Complete Qualification to see kernels available for JSON export."; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: DesignTokens.textMuted }
+                            Label { text: "Run Qualification in Replay & Qualify to make current-policy kernels available for JSON export."; Layout.fillWidth: true; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; color: DesignTokens.textMuted }
                             PaddedButton { text: "Replay & Qualify"; Layout.alignment: Qt.AlignHCenter; onClicked: studio.selectStage(3) }
                         }
                     }

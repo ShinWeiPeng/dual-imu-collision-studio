@@ -16,8 +16,6 @@ class ProfileCommandPort(Protocol):
         model_name: str,
         *,
         input_units: str,
-        release_ratio: float,
-        release_quiet_time_s: float,
     ) -> str: ...
 
 

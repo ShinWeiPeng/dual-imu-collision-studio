@@ -27,7 +27,7 @@ def self_rows(xyz, discontinuities, eligible, lag_count):
     resets = np.asarray(discontinuities, dtype=bool)
     if (
         values.ndim != 2
-        or values.shape[1] != 3
+        or values.shape[1] not in (3, 6)
         or valid.shape != (len(values),)
         or resets.shape != valid.shape
     ):
@@ -49,7 +49,11 @@ def self_rows(xyz, discontinuities, eligible, lag_count):
         indexes.append(t)
         rows.append(values[t - lag_count : t][::-1].T.reshape(-1))
     indexes = np.asarray(indexes, dtype=np.int64)
-    return np.asarray(rows).reshape(-1, 3 * lag_count), values[indexes], indexes
+    return (
+        np.asarray(rows).reshape(-1, values.shape[1] * lag_count),
+        values[indexes],
+        indexes,
+    )
 
 
 def _wrap(model, settings):
@@ -74,6 +78,8 @@ def prepare_recording(recording, settings):
     filtered, warm = preprocess(
         source, recording.discontinuity_before, settings, recording.sample_rate_hz
     )
+    if recording.training_eligible is not None:
+        warm &= np.asarray(recording.training_eligible, dtype=bool)
     # These are internal solver input/target buffers, not a fabricated second physical sensor.
     shifted = np.zeros_like(filtered)
     shifted[1:] = filtered[:-1]

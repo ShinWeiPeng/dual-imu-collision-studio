@@ -44,6 +44,8 @@ Dialog {
             let inside = internalMap.draft(), outside = externalMap.draft()
             let internalColumns = inside.raw_columns.concat(inside.filtered_columns)
             let externalColumns = outside.raw_columns.concat(outside.filtered_columns)
+            if (inside.gyroscope) internalColumns = internalColumns.concat(inside.gyroscope.raw_columns, inside.gyroscope.filtered_columns)
+            if (outside.gyroscope) externalColumns = externalColumns.concat(outside.gyroscope.raw_columns, outside.gyroscope.filtered_columns)
             if (externalColumns.some(function(c) { return internalColumns.indexOf(c) >= 0 }))
                 return failValidation("Internal and External XYZ must use different columns")
         }
@@ -218,12 +220,12 @@ Dialog {
                 Label { text: "The source values are never resampled or repaired silently."; color: DesignTokens.textMuted }
             }
 
-            SensorMapping {
+            ImuSignalMapping {
                 id:internalMap; sensor:"internal"; columns:wizard.columns; timeRequest:wizard.timeRequest()
                 onErrorTextChanged: if (wizard.step === 2) wizard.validationError = ""
                 onFilterParametersAdopted: parameters => { wizard.recentFilterParameters = parameters }
             }
-            SensorMapping {
+            ImuSignalMapping {
                 id:externalMap; sensor:"external"; columns:wizard.columns; timeRequest:wizard.timeRequest()
                 onErrorTextChanged: if (wizard.step === 3) wizard.validationError = ""
                 onFilterParametersAdopted: parameters => { wizard.recentFilterParameters = parameters }

@@ -49,6 +49,8 @@ class ProfileExportService:
         profile = request.profile
         if request.profile.model_family != "fir":
             raise ValueError("MLP standalone export is unavailable; use desktop Replay")
+        if profile.signal_channels != ("ax", "ay", "az"):
+            raise ValueError("Gyroscope profiles require versioned JSON export")
         self._validate(profile)
         if request.language == "C++17":
             return self._render_cpp(profile)
@@ -150,6 +152,8 @@ class ProfileExportService:
             ],
             "arithmetic": "non-FMA; output-input-lag; round-to-nearest-ties-to-even; correctly-rounded-sqrt",
         }
+        if profile.signal_channels != ("ax", "ay", "az"):
+            payload["signal_channels"] = profile.signal_channels
         encoded = json.dumps(
             payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
         ).encode("ascii")
@@ -163,14 +167,24 @@ class ProfileExportService:
         number = profile.kernel_id.removeprefix("fir-")
         return f"FIR_{profile.sample_rate_hz:g}Hz_{number}"
 
+    @staticmethod
+    def validate_model_name(model_name: str) -> None:
+        if (
+            not isinstance(model_name, str)
+            or not model_name.strip()
+            or any(unicodedata.category(char) in {"Cc", "Cs"} for char in model_name)
+        ):
+            raise ValueError(
+                "model name must be nonblank Unicode without control characters"
+            )
+
     def render_json(
         self,
         profile: SemanticProfile,
         model_name: str,
         *,
         input_units: str,
-        release_ratio: float,
-        release_quiet_time_s: float,
+        source_preprocessing=None,
     ) -> str:
         """Encode one frozen qualified FIR model without a device-capacity gate."""
         if profile.model_family != "fir":
@@ -183,14 +197,7 @@ class ProfileExportService:
                 "JSON export requires qualification with 1_OF_1 confirmation; "
                 "multi-sample confirmation cannot be changed during export"
             )
-        if (
-            not isinstance(model_name, str)
-            or not model_name.strip()
-            or any(unicodedata.category(char) in {"Cc", "Cs"} for char in model_name)
-        ):
-            raise ValueError(
-                "model name must be nonblank Unicode without control characters"
-            )
+        self.validate_model_name(model_name)
         if input_units not in {"g", "m/s^2"}:
             raise ValueError("explicit acceleration input units are required")
         if profile.scale_method not in {"STD", "MAD"}:
@@ -216,23 +223,26 @@ class ProfileExportService:
             raise ValueError("sample rate must be finite and positive")
         threshold = numbers(profile.threshold)
         scales = numbers(profile.residual_scales)
-        ratio = numbers(release_ratio)
-        quiet = float(release_quiet_time_s)
         if threshold <= 0 or any(value <= 0 for value in scales):
             raise ValueError("threshold and residual scales must be positive")
-        if not 0 < ratio < 1 or not np.isfinite(quiet) or quiet <= 0:
-            raise ValueError("frozen release settings must be finite and valid")
         execution = {
             "format": "collision-model-parameters",
-            "schema_version": 1,
+            "schema_version": 1 if profile.signal_channels == ("ax", "ay", "az") else 2,
             "model_family": "dual_imu_fir",
             "numeric_type": profile.numeric_type,
             "required_sample_rate_hz": rate,
             "input": {
                 "input_sensor": "Internal",
                 "target_sensor": "External",
-                "axes": ["X", "Y", "Z"],
-                "units": input_units,
+                "axes": ["X", "Y", "Z"]
+                if profile.signal_channels == ("ax", "ay", "az")
+                else list(profile.signal_channels),
+                "units": input_units
+                if profile.signal_channels == ("ax", "ay", "az")
+                else [
+                    input_units if channel.startswith("a") else "as_recorded"
+                    for channel in profile.signal_channels
+                ],
                 "feature_order": "input_axis_then_lag",
                 "weight_order": "output_axis_input_axis_lag",
                 "lag_order": "current_to_past",
@@ -257,10 +267,16 @@ class ProfileExportService:
                 "baseline_threshold": threshold,
                 "confirmation_mode": profile.confirmation_mode,
                 "comparison": "score>threshold",
-                "release_ratio": ratio,
-                "release_quiet_time_s": quiet,
             },
         }
+        if source_preprocessing is not None:
+            execution["schema_version"] = 2
+            execution["preprocessing"] = {
+                "mode": "mapped_model_inputs",
+                "input_stage": "after_selected_preprocessing",
+                "additional_model_filter": "none",
+                "recordings": source_preprocessing,
+            }
         canonical = json.dumps(
             execution,
             ensure_ascii=False,
@@ -299,15 +315,22 @@ class ProfileExportService:
             raise ValueError("only a qualified Profile can be exported")
         if profile.numeric_type not in {"float32", "float64"}:
             raise ValueError("Profile numeric type must be float32 or float64")
+        if profile.signal_channels not in (
+            ("ax", "ay", "az"),
+            ("gx", "gy", "gz"),
+            ("ax", "ay", "az", "gx", "gy", "gz"),
+        ):
+            raise ValueError("Invalid signal channel identity or order")
+        channels = len(profile.signal_channels)
         weights = np.asarray(profile.weights)
-        if weights.shape != (3, 3, profile.tap_count):
+        if weights.shape != (channels, channels, profile.tap_count):
             raise ValueError("weights must use [3][3][tap_count] order")
         for name, values in (
             ("biases", profile.biases),
             ("residual centers", profile.residual_centers),
             ("residual scales", profile.residual_scales),
         ):
-            if np.asarray(values).shape != (3,):
+            if np.asarray(values).shape != (channels,):
                 raise ValueError(f"{name} must contain three axes")
         if not profile.coverage:
             raise ValueError("qualified condition coverage is required")

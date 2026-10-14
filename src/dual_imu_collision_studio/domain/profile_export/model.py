@@ -63,6 +63,7 @@ class SemanticProfile:
     model_family: str = "fir"
     mlp_epochs: int = 0
     mlp_stop_reason: str = ""
+    signal_channels: tuple[str, ...] = ("ax", "ay", "az")
 
 
 @dataclass(frozen=True, slots=True)
