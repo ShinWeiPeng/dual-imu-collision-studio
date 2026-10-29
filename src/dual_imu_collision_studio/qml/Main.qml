@@ -1642,7 +1642,7 @@ ApplicationWindow {
                         Label { text: "Kernel ID"; font.bold: true; Layout.preferredWidth: 110 }
                         Label { text: "History / taps"; font.bold: true; Layout.preferredWidth: 180 }
                         Label { text: "Threshold"; font.bold: true; Layout.preferredWidth: 130 }
-                        Label { text: "Qualified range (mm/s)"; font.bold: true; Layout.fillWidth: true }
+                        Label { text: "Qualified range (mm/s, offset)"; font.bold: true; Layout.fillWidth: true }
                         Item { Layout.preferredWidth: 170 }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: DesignTokens.border }

@@ -3991,11 +3991,12 @@ class StudioController(QObject):
                     "kernelId": profile.kernel_id,
                     "kernelDepth": f"{profile.effective_history_ms:g} ms / {profile.tap_count} taps",
                     "threshold": f"{profile.threshold:.9g}",
-                    "qualifiedRange": self._discrete_speed_text(
-                        candidate.passing_speeds
+                    "qualifiedRange": (
+                        self._discrete_speed_text(candidate.passing_speeds)
+                        if candidate is not None
+                        else self._range_text(profile.qualified_speed_range)
                     )
-                    if candidate is not None
-                    else self._range_text(profile.qualified_speed_range),
+                    + f"\nOffset: {self._offset_text(profile.covered_offsets_mm)}",
                     "deploymentState": state,
                     "canValidate": can_validate
                     and not self.qualificationValidationActive,
