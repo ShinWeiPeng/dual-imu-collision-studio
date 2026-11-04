@@ -719,7 +719,7 @@ ApplicationWindow {
                         property real trackLeft: 170
                         property real trackWidth: Math.max(1, width - 190)
                         Column { anchors.fill: parent; anchors.margins: 8; spacing: 4
-                            Repeater { model: [["Cycle", DesignTokens.cycle], ["Pick", DesignTokens.pick], ["Put", DesignTokens.put], ["Fork Collision", DesignTokens.collision], ["Ignore", DesignTokens.ignore], ["Normal Robot Motion · read-only", "#A9C5B8"]]
+                            Repeater { model: [["Cycle", DesignTokens.cycle], ["Pick", DesignTokens.pick], ["Put", DesignTokens.put], ["Fork Collision", DesignTokens.collision], ["Ignore reason", DesignTokens.ignore], ["Normal Robot Motion · read-only", "#A9C5B8"]]
                                 Rectangle { required property var modelData; width: parent.width; height: 24; color: "#F1F4F8"; radius: 3
                                     Label { x: 7; anchors.verticalCenter: parent.verticalCenter; text: modelData[0]; font.pixelSize: 10; color: DesignTokens.textMuted }
                                 }
@@ -1012,7 +1012,7 @@ ApplicationWindow {
                         Label {
                             id: intervalLabel
                             anchors.centerIn: parent
-                            text: (modelData.anchor ? "Anchor · " : modelData.provisional ? "Suggested · " : "") + modelData.kind
+                            text: (modelData.anchor ? "Anchor · " : modelData.provisional ? "Suggested · " : "") + (modelData.kind === "Ignore" ? modelData.reason : modelData.kind)
                             color: "white"
                             font.bold: true
                             font.pixelSize: 10
