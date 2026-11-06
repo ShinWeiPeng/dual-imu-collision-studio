@@ -265,4 +265,88 @@ value:
       meaning: Bounded user-visible failure message.
     intended_consumers:
     - desktop_adapter
+- id: annotations.exported
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job saved.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
+    intended_consumers:
+    - desktop_adapter
+- id: annotations.export-failed
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job failed.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
+    intended_consumers:
+    - desktop_adapter
+- id: annotations.export-cancelled
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job cancelled.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
+    intended_consumers:
+    - desktop_adapter
 ```

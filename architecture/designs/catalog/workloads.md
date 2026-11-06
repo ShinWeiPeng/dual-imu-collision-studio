@@ -127,4 +127,18 @@ value:
     volume: One selected candidate with scalar metadata, nine times tap_count FIR
       coefficients, and three three-axis vector sections.
   budgets: []
+- id: annotated-data-write
+  flow: export-annotated-data
+  steps:
+  - export-annotated-data.step-1
+  - export-annotated-data.step-2
+  - export-annotated-data.step-3
+  - export-annotated-data.step-4
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: All confirmed recording rows; one reusable JSONL sample block plus metadata/annotations,
+      no full waveform or artifact copy.
+  budgets: []
 ```

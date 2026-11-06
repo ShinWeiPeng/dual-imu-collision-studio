@@ -20,6 +20,7 @@ ApplicationWindow {
     property string pendingProjectTransition: ""
     property url pendingProjectUrl
     property bool allowProjectClose: false
+    property bool workflowCollapsed: false
     property var jsonExportQueue: []
     property var jsonExportCurrent: ({})
     property url jsonExportTarget
@@ -48,6 +49,12 @@ ApplicationWindow {
 
     Connections {
         target: studio
+        function onAnnotationExportFinished(result) {
+            if (window.pendingProjectTransition === "close-after-annotated-export") {
+                window.pendingProjectTransition = ""
+                Qt.callLater(window.close)
+            }
+        }
         function onJsonExportFinished(result) {
             if (result === "exists") jsonReplaceDialog.open()
             else if (result === "saved") window.nextJsonExport()
@@ -151,7 +158,7 @@ ApplicationWindow {
     }
 
     function openMappingWizardForRecording(index) {
-        if (index < 0)
+        if (index < 0 || studio.annotationExportActive)
             return
         importPage.captureRecordingsViewport()
         studio.selectRecording(index)
@@ -175,9 +182,9 @@ ApplicationWindow {
                 Label { text: studio.projectName + (studio.projectDirty ? " · Unsaved changes" : " · Saved"); font.pixelSize: 11; color: studio.projectDirty ? DesignTokens.warning : DesignTokens.textMuted }
             }
             Item { Layout.fillWidth: true }
-            PaddedButton { objectName: "openProjectButton"; text: "Open Project"; onClicked: openProjectDialog.open() }
-            PaddedButton { objectName: "saveProjectButton"; text: "Save"; enabled: studio.projectDirty; onClicked: studio.projectPath === "" ? saveProjectDialog.open() : studio.saveProject() }
-            PaddedButton { objectName: "saveProjectAsButton"; text: "Save As"; onClicked: saveProjectDialog.open() }
+            PaddedButton { objectName: "openProjectButton"; text: "Open Project"; enabled: !studio.annotationExportActive; onClicked: openProjectDialog.open() }
+            PaddedButton { objectName: "saveProjectButton"; text: "Save"; enabled: studio.projectDirty && !studio.annotationExportActive; onClicked: studio.projectPath === "" ? saveProjectDialog.open() : studio.saveProject() }
+            PaddedButton { objectName: "saveProjectAsButton"; text: "Save As"; enabled: !studio.annotationExportActive; onClicked: saveProjectDialog.open() }
             Rectangle { width: stateLabel.implicitWidth + 22; height: 30; radius: 15; color: studio.runState === "Complete" ? "#E4F4EE" : DesignTokens.surfaceMuted
                 Label { id: stateLabel; anchors.centerIn: parent; text: studio.runState; color: studio.runState === "Complete" ? DesignTokens.success : DesignTokens.textMuted; font.bold: true; font.pixelSize: 12 }
             }
@@ -208,12 +215,33 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
         Rectangle {
-            Layout.preferredWidth: 238
+            objectName: "workflowSidebar"
+            Layout.minimumWidth: window.workflowCollapsed ? 72 : 238
+            Layout.preferredWidth: window.workflowCollapsed ? 72 : 238
+            Layout.maximumWidth: window.workflowCollapsed ? 72 : 238
             Layout.fillHeight: true
             color: "#F9FBFD"
             border.color: DesignTokens.border
             ColumnLayout { anchors.fill: parent; anchors.margins: 12; spacing: 8
-                Label { text: "WORKFLOW"; color: DesignTokens.textMuted; font.pixelSize: 11; font.bold: true; leftPadding: 8; topPadding: 8; bottomPadding: 4 }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 36
+                    Label { visible: !window.workflowCollapsed; text: "WORKFLOW"; color: DesignTokens.textMuted; font.pixelSize: 11; font.bold: true; leftPadding: 8; Layout.fillWidth: true }
+                    ToolButton {
+                        objectName: "workflowToggle"
+                        text: window.workflowCollapsed ? "›" : "‹"
+                        font.pixelSize: 24
+                        Layout.preferredWidth: 36
+                        Layout.preferredHeight: 36
+                        Layout.alignment: Qt.AlignHCenter
+                        focusPolicy: Qt.StrongFocus
+                        Accessible.name: window.workflowCollapsed ? "Expand Workflow" : "Collapse Workflow"
+                        ToolTip.visible: hovered
+                        ToolTip.text: window.workflowCollapsed ? "Expand Workflow" : "Collapse Workflow"
+                        ToolTip.delay: 350
+                        onClicked: window.workflowCollapsed = !window.workflowCollapsed
+                    }
+                }
                 ListView {
                     id: stageNavigator
                     objectName: "stageNavigator"
@@ -223,21 +251,29 @@ ApplicationWindow {
                     delegate: Rectangle {
                         required property var modelData
                         required property int index
+                        objectName: "workflowStage" + index
                         width: ListView.view.width; height: 58; radius: DesignTokens.radius
-                        enabled: modelData.enabled
-                        opacity: enabled ? 1.0 : 0.48
+                        opacity: modelData.enabled ? 1.0 : 0.48
+                        Accessible.role: Accessible.Button
+                        Accessible.name: modelData.name
+                        Accessible.description: modelData.enabled ? "" : "Unavailable"
+                        Accessible.onPressAction: if (modelData.enabled) studio.selectStage(index)
                         color: studio.selectedStage === index ? DesignTokens.primarySoft : navMouse.containsMouse ? DesignTokens.surfaceMuted : "transparent"
                         border.color: studio.selectedStage === index ? "#B8D2F6" : "transparent"
                         RowLayout { anchors.fill: parent; anchors.margins: 10; spacing: 10
                             Rectangle { width: 28; height: 28; radius: 14; color: modelData.state === "complete" ? DesignTokens.success : studio.selectedStage === index ? DesignTokens.primary : DesignTokens.surfaceMuted
                                 Label { anchors.centerIn: parent; text: modelData.state === "complete" ? "✓" : modelData.number; color: modelData.state === "pending" ? DesignTokens.textMuted : "white"; font.bold: true }
                             }
-                            Label { text: modelData.name; Layout.fillWidth: true; wrapMode: Text.Wrap; color: DesignTokens.text; font.bold: studio.selectedStage === index }
+                            Label { objectName: "workflowStageName" + index; visible: !window.workflowCollapsed; text: modelData.name; Layout.fillWidth: true; wrapMode: Text.Wrap; color: DesignTokens.text; font.bold: studio.selectedStage === index }
                         }
                         MouseArea { id: navMouse; anchors.fill: parent; enabled: modelData.enabled; hoverEnabled: true; onClicked: studio.selectStage(index) }
+                        HoverHandler { id: stageHover }
+                        ToolTip.visible: window.workflowCollapsed && stageHover.hovered
+                        ToolTip.text: modelData.name + (modelData.enabled ? "" : " · Unavailable")
+                        ToolTip.delay: 350
                     }
                 }
-                Rectangle { Layout.fillWidth: true; height: 70; radius: DesignTokens.radius; color: DesignTokens.surfaceMuted
+                Rectangle { objectName: "workflowSessionLimits"; visible: !window.workflowCollapsed; Layout.fillWidth: true; height: 70; radius: DesignTokens.radius; color: DesignTokens.surfaceMuted
                     Column { anchors.fill: parent; anchors.margins: 10; spacing: 4
                         Label { text: "Session limits"; font.bold: true; font.pixelSize: 11; color: DesignTokens.text }
                         Label { text: "50 recordings · 10M rows total"; font.pixelSize: 11; color: DesignTokens.textMuted }
@@ -351,6 +387,13 @@ ApplicationWindow {
             PaddedButton { text: "Save"; highlighted: true; DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole; onClicked: { unsavedProjectDialog.close(); window.saveBeforeProjectTransition() } }
         }
     }
+    FolderDialog {
+        id: annotationExportFolderDialog
+        objectName: "annotationExportFolderDialog"
+        title: "Choose annotated data parent folder"
+        currentFolder: StandardPaths.standardLocations(StandardPaths.DocumentsLocation)[0]
+        onAccepted: studio.exportAnnotatedData(selectedFolder)
+    }
     FolderDialog { id: exportFolderDialog; title: "Choose Profile header folder"; onAccepted: studio.prepareSelectedExport(selectedFolder.toString()) }
     Dialog {
         id: conflictDialog
@@ -379,6 +422,12 @@ ApplicationWindow {
     }
 
     onClosing: close => {
+        if (studio.annotationExportActive) {
+            close.accepted = false
+            window.pendingProjectTransition = "close-after-annotated-export"
+            studio.cancelAnnotatedDataExport()
+            return
+        }
         if (studio.jsonExportActive || studio.qualificationValidationActive) {
             close.accepted = false
             return
@@ -481,7 +530,7 @@ ApplicationWindow {
                             Layout.fillWidth: true
                             font.pixelSize: 11
                         }
-                        PaddedButton { text: "Open Mapping Wizard"; Layout.fillWidth: true; enabled: studio.selectedRecording >= 0; highlighted: true; onClicked: window.openMappingWizardForRecording(studio.selectedRecording) }
+                        PaddedButton { text: "Open Mapping Wizard"; Layout.fillWidth: true; enabled: studio.selectedRecording >= 0 && !studio.annotationExportActive; highlighted: true; onClicked: window.openMappingWizardForRecording(studio.selectedRecording) }
                         PaddedButton { text: "Remove Recording"; Layout.fillWidth: true; enabled: studio.selectedRecording >= 0; onClicked: studio.removeRecording(studio.selectedRecording) }
                         Label { visible: studio.duplicateConditionSummary.length > 0; text: studio.duplicateConditionSummary; color: DesignTokens.warning; wrapMode: Text.Wrap; Layout.fillWidth: true; font.pixelSize: 11 }
                         PaddedButton { text: "Confirm Intentional Repeated Acquisition"; Layout.fillWidth: true; visible: studio.duplicateConditionSummary.length > 0; onClicked: studio.confirmIntentionalDuplicates() }
@@ -501,6 +550,7 @@ ApplicationWindow {
         property real endX: 0
         property real pendingIgnoreStart: 0
         property real pendingIgnoreEnd: 0
+        property var pendingIgnoreRelabel: null
         property real viewportStart: 0.0
         property real viewportEnd: 1.0
         property bool draggingGroup: false
@@ -549,13 +599,30 @@ ApplicationWindow {
             draggedAnnotationIndex = -1
             studio.commitAnnotationGesture(index, additive, moved, finalDelta)
         }
+        function clearGroupDrag() {
+            draggingGroup = false
+            dragDelta = 0
+            draggedAnnotationIndex = -1
+        }
+        function relabelFromLane(kind, intervalId) {
+            const recording = studio.selectedRecording
+            if (kind === "Ignore") {
+                pendingIgnoreRelabel = { recording: recording, intervalId: intervalId }
+                ignoreReason.text = ""
+                ignoreDialog.open()
+            } else {
+                studio.relabelAnnotation(recording, intervalId, kind, "")
+            }
+        }
         Shortcut { sequences: [StandardKey.Undo]; onActivated: studio.undoAnnotation() }
         Shortcut { sequences: [StandardKey.Redo]; onActivated: studio.redoAnnotation() }
         Shortcut { sequence: "Delete"; onActivated: studio.deleteSelectedAnnotation() }
         Shortcut { sequence: "Escape"; onActivated: activeTool = "Select / Edit" }
         Dialog {
             id: ignoreDialog
+            objectName: "annotationIgnoreDialog"
             modal: true
+            onClosed: annotationPage.pendingIgnoreRelabel = null
             anchors.centerIn: parent
             width: 440
             closePolicy: Popup.NoAutoClose
@@ -579,86 +646,123 @@ ApplicationWindow {
                 width: parent.width
                 spacing: 10
                 Label { text: "Explain why this waveform range must be excluded."; wrapMode: Text.Wrap; Layout.fillWidth: true }
-                TextField { id: ignoreReason; Layout.fillWidth: true; placeholderText: "Required reason" }
+                TextField { id: ignoreReason; objectName: "annotationIgnoreReason"; Layout.fillWidth: true; placeholderText: "Required reason" }
             }
             footer: DialogButtonBox {
                 PaddedButton {
+                    objectName: "annotationIgnoreCancel"
                     text: "Cancel"
                     DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
                     onClicked: ignoreDialog.reject()
                 }
                 PaddedButton {
+                    objectName: "annotationIgnoreConfirm"
                     text: "Confirm"
                     highlighted: true
                     enabled: ignoreReason.text.trim().length > 0
                     DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
                     onClicked: {
-                        if (studio.createAnnotation("Ignore", pendingIgnoreStart, pendingIgnoreEnd, ignoreReason.text))
+                        const pending = annotationPage.pendingIgnoreRelabel
+                        const committed = pending
+                            ? studio.relabelAnnotation(pending.recording, pending.intervalId, "Ignore", ignoreReason.text)
+                            : studio.createAnnotation("Ignore", pendingIgnoreStart, pendingIgnoreEnd, ignoreReason.text)
+                        if (committed)
                             ignoreDialog.accept()
                     }
                 }
             }
         }
         ColumnLayout { anchors.fill: parent; anchors.margins: 18; spacing: 10
-            RowLayout { Layout.fillWidth: true
-                SectionTitle { heading: "Annotate & Classify"; supporting: "Choose a label and drag on either waveform to create an interval. Mouse wheel zooms; Select / Edit drag pans. Normal Robot Motion is derived and read-only."; Layout.fillWidth: true }
-                Tag { objectName: "annotationRecordingTag"; label: "Recording: " + studio.selectedRecordingName; tagColor: DesignTokens.surfaceMuted }
-                ComboBox {
-                    id: annotationRecordingSelector
-                    objectName: "annotationRecordingSelector"
-                    Layout.preferredWidth: 300
-                    model: studio.annotationRecordingOptions
-                    textRole: "label"
-                    valueRole: "index"
-                    currentIndex: studio.selectedRecording
-                    onActivated: studio.selectRecording(currentIndex)
-                    Accessible.name: "Select annotation recording"
+            RowLayout { Layout.fillWidth: true; spacing: 16
+                ColumnLayout { Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.alignment: Qt.AlignTop; spacing: 10
+                    SectionTitle { heading: "Annotate & Classify"; supporting: "Choose a label and drag on either waveform to create an interval. Mouse wheel zooms; Select / Edit drag pans. Normal Robot Motion shows the training range, including Pick and Put, and is read-only."; Layout.fillWidth: true }
+                    RowLayout { Layout.fillWidth: true
+                        Label { text: "Reference: " + studio.activeTemplateSummary; color: DesignTokens.textMuted; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight }
+                        Label { visible: studio.annotationBlockerMessage.length > 0; text: studio.annotationBlockerMessage; color: DesignTokens.warning; font.pixelSize: 11; wrapMode: Text.Wrap; Layout.maximumWidth: 620 }
+                    }
+                    Label {
+                        objectName: "annotationProgressSummary"
+                        text: studio.annotationProgressText
+                        color: DesignTokens.textMuted
+                        font.pixelSize: 11
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                    }
+                    Label {
+                        visible: studio.activeTemplateDetails.length > 0
+                        text: studio.activeTemplateDetails
+                        color: DesignTokens.textMuted
+                        font.pixelSize: 11
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                    }
                 }
-                PaddedButton {
-                    objectName: "useReferenceButton"
-                    text: studio.activeTemplateSummary === "No active reference for this speed"
-                          ? "Use as Reference" : "Replace Reference…"
-                    enabled: studio.canUseSelectedCycleAsReference
-                    onClicked: studio.useSelectedCycleAsReference()
+                ColumnLayout { Layout.alignment: Qt.AlignTop | Qt.AlignRight; spacing: 10
+                    RowLayout { Layout.alignment: Qt.AlignRight; Layout.fillWidth: false; spacing: 8
+                        Tag { objectName: "annotationRecordingTag"; label: "Recording: " + studio.selectedRecordingName; tagColor: DesignTokens.surfaceMuted }
+                        ComboBox {
+                            id: annotationRecordingSelector
+                            objectName: "annotationRecordingSelector"
+                            Layout.preferredWidth: 300
+                            model: studio.annotationRecordingOptions
+                            textRole: "label"
+                            valueRole: "index"
+                            currentIndex: studio.selectedRecording
+                            onActivated: studio.selectRecording(currentIndex)
+                            Accessible.name: "Select annotation recording"
+                        }
+                    }
+                    RowLayout { Layout.alignment: Qt.AlignRight; Layout.fillWidth: false; spacing: 8
+                        objectName: "annotationActions"
+                        PaddedButton {
+                            objectName: "useReferenceButton"
+                            text: studio.activeTemplateSummary === "No active reference for this speed"
+                                  ? "Use as Reference" : "Replace Reference…"
+                            enabled: studio.canUseSelectedCycleAsReference && !studio.annotationExportActive
+                            onClicked: studio.useSelectedCycleAsReference()
+                        }
+                        PaddedButton {
+                            objectName: "confirmAllAnnotationsButton"
+                            text: "Confirm All Annotation Sets"
+                            enabled: !studio.annotationExportActive
+                            highlighted: studio.canConfirmAnnotations && !studio.annotationsReady
+                            onClicked: studio.confirmAnnotations()
+                        }
+                        PaddedButton {
+                            objectName: "exportAnnotatedDataButton"
+                            text: "Export Annotated Data…"
+                            enabled: studio.canExportAnnotatedData
+                            ToolTip.visible: hovered
+                            ToolTip.text: studio.annotationsReady
+                                ? "Export every confirmed recording with full samples and annotations in one file each. Finish active work first."
+                                : "First complete Confirm All Annotation Sets."
+                            onClicked: annotationExportFolderDialog.open()
+                        }
+                        PaddedButton {
+                            objectName: "cancelAnnotatedDataExportButton"
+                            text: "Cancel Export"
+                            visible: studio.annotationExportActive
+                            onClicked: studio.cancelAnnotatedDataExport()
+                        }
+                    }
+                    RowLayout {
+                        visible: studio.annotationExportActive
+                        Layout.fillWidth: true
+                        Label { text: "Exporting confirmed recordings · " + Math.round(studio.annotationExportProgress * 100) + "%"; color: DesignTokens.textMuted; font.pixelSize: 11 }
+                        ProgressBar { objectName: "annotatedDataExportProgress"; value: studio.annotationExportProgress; Layout.fillWidth: true }
+                    }
                 }
-                PaddedButton {
-                    objectName: "confirmAllAnnotationsButton"
-                    text: "Confirm All Annotation Sets"
-                    highlighted: studio.canConfirmAnnotations && !studio.annotationsReady
-                    onClicked: studio.confirmAnnotations()
-                }
             }
-            RowLayout { Layout.fillWidth: true
-                Label { text: "Reference: " + studio.activeTemplateSummary; color: DesignTokens.textMuted; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight }
-                Label { visible: studio.annotationBlockerMessage.length > 0; text: studio.annotationBlockerMessage; color: DesignTokens.warning; font.pixelSize: 11; wrapMode: Text.Wrap; Layout.maximumWidth: 620 }
-            }
-            Label {
-                objectName: "annotationProgressSummary"
-                text: studio.annotationProgressText
-                color: DesignTokens.textMuted
-                font.pixelSize: 11
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-            }
-            Label {
-                visible: studio.activeTemplateDetails.length > 0
-                text: studio.activeTemplateDetails
-                color: DesignTokens.textMuted
-                font.pixelSize: 11
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-            }
-            Card { Layout.fillWidth: true; height: 54
-                RowLayout { anchors.fill: parent; anchors.margins: 8; spacing: 6
+            Card { Layout.fillWidth: true; implicitHeight: Math.max(54, annotationToolsFlow.implicitHeight + 16)
+                Flow { id: annotationToolsFlow; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 8; spacing: 6
                     Repeater { model: ["Select / Edit", "Cycle", "Pick", "Put", "Fork Collision", "Ignore"]
                         PaddedButton { required property string modelData; text: modelData; checkable: true; checked: activeTool === modelData; onClicked: activeTool = modelData }
                     }
-                    Rectangle { width: 1; Layout.fillHeight: true; color: DesignTokens.border }
-                    PaddedButton { text: "Undo"; enabled: studio.canUndoAnnotation; onClicked: studio.undoAnnotation() }
-                    PaddedButton { text: "Redo"; enabled: studio.canRedoAnnotation; onClicked: studio.redoAnnotation() }
-                    PaddedButton { text: "Delete"; onClicked: studio.deleteSelectedAnnotation() }
+                    Rectangle { width: 1; height: DesignTokens.buttonHeight; color: DesignTokens.border }
+                    PaddedButton { text: "Undo"; enabled: studio.canUndoAnnotation && !studio.annotationExportActive; onClicked: studio.undoAnnotation() }
+                    PaddedButton { text: "Redo"; enabled: studio.canRedoAnnotation && !studio.annotationExportActive; onClicked: studio.redoAnnotation() }
+                    PaddedButton { text: "Delete"; enabled: !studio.annotationExportActive; onClicked: studio.deleteSelectedAnnotation() }
                     PaddedButton { text: "Reset View"; onClicked: annotationPage.resetViewport() }
-                    Item { Layout.fillWidth: true }
                 }
             }
             Card { Layout.fillWidth: true; Layout.fillHeight: true
@@ -718,8 +822,14 @@ ApplicationWindow {
                     Rectangle { id: lanes; objectName: "annotationLanes"; Layout.fillWidth: true; Layout.preferredHeight: 184; color: "#FBFCFE"; border.color: DesignTokens.border; radius: 6
                         property real trackLeft: 170
                         property real trackWidth: Math.max(1, width - 190)
-                        Column { anchors.fill: parent; anchors.margins: 8; spacing: 4
-                            Repeater { model: [["Cycle", DesignTokens.cycle], ["Pick", DesignTokens.pick], ["Put", DesignTokens.put], ["Fork Collision", DesignTokens.collision], ["Ignore reason", DesignTokens.ignore], ["Normal Robot Motion · read-only", "#A9C5B8"]]
+                        function rowAt(y) {
+                            const first = laneRows.itemAt(0)
+                            const index = Math.floor((y - laneColumn.y) / (first.height + laneColumn.spacing))
+                            const row = laneRows.itemAt(index)
+                            return row && y < laneColumn.y + row.y + row.height ? index : -1
+                        }
+                        Column { id: laneColumn; anchors.fill: parent; anchors.margins: 8; spacing: 4
+                            Repeater { id: laneRows; model: [["Cycle", DesignTokens.cycle], ["Pick", DesignTokens.pick], ["Put", DesignTokens.put], ["Fork Collision", DesignTokens.collision], ["Ignore reason", DesignTokens.ignore], ["Normal Robot Motion · read-only", "#A9C5B8"]]
                                 Rectangle { required property var modelData; width: parent.width; height: 24; color: "#F1F4F8"; radius: 3
                                     Label { x: 7; anchors.verticalCenter: parent.verticalCenter; text: modelData[0]; font.pixelSize: 10; color: DesignTokens.textMuted }
                                 }
@@ -753,7 +863,11 @@ ApplicationWindow {
                                 visible: visualEnd > annotationPage.viewportStart && visualStart < annotationPage.viewportEnd
                                 x: lanes.trackLeft + (clippedStart - annotationPage.viewportStart) / annotationPage.viewportSpan * lanes.trackWidth
                                 y: 12 + modelData.lane * 28
-                                width: Math.max(5, (clippedEnd - clippedStart) / annotationPage.viewportSpan * lanes.trackWidth)
+                                readonly property real bodyHitWidth: 5
+                                readonly property real handleWidth: 6
+                                // Leave the body draggable even for a one-sample event.
+                                readonly property real handleInset: Math.min(0, (width - bodyHitWidth) / 2 - handleWidth)
+                                width: Math.max(bodyHitWidth, (clippedEnd - clippedStart) / annotationPage.viewportSpan * lanes.trackWidth)
                                 height: 16
                                 radius: 3
                                 color: [DesignTokens.cycle, DesignTokens.pick, DesignTokens.put, DesignTokens.collision, DesignTokens.ignore][modelData.lane]
@@ -766,6 +880,7 @@ ApplicationWindow {
                                     id: intervalMouse
                                     objectName: "annotationLaneIntervalMouse"
                                     anchors.fill: parent
+                                    preventStealing: true
                                     hoverEnabled: true
                                     enabled: activeTool === "Select / Edit"
                                     property real pressLaneX: 0
@@ -785,23 +900,35 @@ ApplicationWindow {
                                         originalStart = annotationBar.visualStart
                                         originalEnd = annotationBar.visualEnd
                                     }
-                                    onPositionChanged: mouse => { if (pressed) {
-                                        let delta = (mapToItem(lanes, mouse.x, mouse.y).x - pressLaneX) / lanes.trackWidth * annotationPage.viewportSpan
-                                        annotationPage.dragDelta = delta
-                                        moved = moved || Math.abs(delta) > 1e-6
-                                    } }
-                                    onReleased: {
-                                        let finalDelta = annotationPage.dragDelta
-                                        annotationPage.finishGroupDrag(index, additiveSelection, moved, finalDelta)
+                                    onPositionChanged: mouse => {
+                                        if (!pressed)
+                                            return
+                                        const point = mapToItem(lanes, mouse.x, mouse.y)
+                                        const sameRow = lanes.rowAt(point.y) === modelData.lane
+                                        const delta = (point.x - pressLaneX) / lanes.trackWidth * annotationPage.viewportSpan
+                                        annotationPage.dragDelta = sameRow ? delta : 0
+                                        moved = moved || (sameRow && Math.abs(delta) > 1e-6)
                                     }
-                                    onCanceled: {
-                                        annotationPage.draggingGroup = false
-                                        annotationPage.dragDelta = 0
-                                        annotationPage.draggedAnnotationIndex = -1
+                                    onReleased: mouse => {
+                                        const point = mapToItem(lanes, mouse.x, mouse.y)
+                                        const targetRow = lanes.rowAt(point.y)
+                                        if (targetRow === modelData.lane) {
+                                            annotationPage.finishGroupDrag(index, additiveSelection, moved, annotationPage.dragDelta)
+                                            return
+                                        }
+                                        annotationPage.clearGroupDrag()
+                                        const eventKinds = ["", "Pick", "Put", "Fork Collision", "Ignore"]
+                                        const targetKind = eventKinds[targetRow]
+                                        if (eventKinds[modelData.lane] && targetKind
+                                            && point.x >= laneColumn.x && point.x < laneColumn.x + laneColumn.width)
+                                            annotationPage.relabelFromLane(targetKind, modelData.intervalId)
                                     }
+                                    onCanceled: annotationPage.clearGroupDrag()
                                 }
                                 Rectangle {
-                                    width: 6; height: parent.height + 6; anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
+                                    width: annotationBar.handleWidth; height: parent.height + 6
+                                    anchors.left: parent.left; anchors.leftMargin: annotationBar.handleInset
+                                    anchors.verticalCenter: parent.verticalCenter
                                     color: "white"; border.color: DesignTokens.textMuted; visible: modelData.selected
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.SizeHorCursor
@@ -812,7 +939,9 @@ ApplicationWindow {
                                     }
                                 }
                                 Rectangle {
-                                    width: 6; height: parent.height + 6; anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+                                    width: annotationBar.handleWidth; height: parent.height + 6
+                                    anchors.right: parent.right; anchors.rightMargin: annotationBar.handleInset
+                                    anchors.verticalCenter: parent.verticalCenter
                                     color: "white"; border.color: DesignTokens.textMuted; visible: modelData.selected
                                     MouseArea {
                                         anchors.fill: parent; cursorShape: Qt.SizeHorCursor

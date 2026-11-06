@@ -78,6 +78,9 @@ modules:
     - replay.export-failed
     - model.exported
     - model.export-failed
+    - annotations.exported
+    - annotations.export-failed
+    - annotations.export-cancelled
     owned_state: []
     side_effects:
     - description: Start the Qt application and coordinate bounded background work.
@@ -85,8 +88,15 @@ modules:
         the application-owned diagnostics port.
     errors: []
     invariants:
+    - SPEC-0050 maps confirmed workspace intervals into Learning-owned values once
+      for both fitting input and the read-only Normal training track; the track includes
+      Pick/Put and retains Cycle boundaries without altering exclusive Normal truth
+      or running a model.
     - Sibling domains communicate only through application-owned mappings.
     - Exactly one release composition root exists.
+    - A cross-lane release maps to one StudioController edit by recording and interval
+      identity. The controller preserves sample geometry, checks the target label
+      and reason, and updates the existing undo history and confirmation state.
     - The QML engine retains the StudioController for the complete main-window lifetime.
     - QML coordinates are converted to sample indexes before domain validation.
     - Provisional annotation edits never enter Learning until the complete set is
@@ -154,6 +164,11 @@ modules:
       values and reconstructs immutable Learning values only after ProjectSessionService
       validates structure. Existing qualification_evidence remains the sole current
       export admission proof, with its original policy and frozen-input checks.
+    - SPEC-0048 exposes Export Annotated Data only after valid Confirm All; one borrowed
+      immutable all-recording snapshot runs in the background. All input mutation,
+      replacement, Training/Qualification and artifact output are rejected during
+      the job; selection/zoom remain available. Terminal UI callbacks release the
+      worker before publishing once; close requests cancel then defer window close.
   entrypoints:
   - path: src/dual_imu_collision_studio/app.py
     symbol: main
@@ -214,9 +229,11 @@ modules:
       and derived Normal regions.
     input_ports:
     - workspace.command
+    - workspace.annotated-export
     output_ports:
     - workspace.tabular-input
     - workspace.events
+    - workspace.annotated-file-output
     emitted_events:
     - workspace.changed
     owned_state: []
@@ -262,6 +279,10 @@ modules:
       uses shared contiguous half-open buckets for Internal and External IMUs, and
       emits a pixel-bounded immutable raw or Min/Max plus arithmetic-mean representation
       without changing annotation indexes.
+    - SPEC-0048 prepares only a complete still-confirmed dataset; derives existing
+      Normal regions, preserves mapped sample values and provenance, never imports
+      Qt or JSON representations, and never confirms provisional annotations as a
+      side effect.
   entrypoints:
   - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
     symbol: WorkspaceService
@@ -279,6 +300,21 @@ modules:
   - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
     symbol: WaveformViewportProjection
     kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ExportChannel
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedRecordingSnapshot
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedDatasetSnapshot
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: AnnotatedDataOutputPort
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
+    symbol: prepare_annotated_export
+    kind: function
 - id: learning_qualification
   level: L1
   role: domain
@@ -309,6 +345,10 @@ modules:
     side_effects: []
     errors: []
     invariants:
+    - SPEC-0050 exposes the existing Cycle-contained Normal/Pick/Put activity mask
+      as a pure query shared by fitting and the parent-owned training-range projection;
+      Ignore and actual Collision subtraction, interval counts, cycle segmentation
+      and model-specific eligibility retain their original semantics.
     - Qualification always replays all supplied speeds.
     - Qualification always replays all supplied offsets, including offsets excluded
       from subsequent fitting rounds.
@@ -590,11 +630,13 @@ modules:
   - process_diagnostics
   - profile_export
   - learning_qualification
+  - data_workspace
   implements_ports:
   - diagnostics.output
   - profile.file-output
   - learning.replay-file-output
   - learning.model-file-output
+  - workspace.annotated-file-output
   description:
     purpose: Present the Qt Quick interface, execute analysis and large artifact exports
       off the UI thread, and atomically write approved header, Replay CSV, and Model
@@ -603,6 +645,15 @@ modules:
     output_ports: []
     emitted_events: []
     owned_state:
+    - ref: pending-ignore-relabel
+      name: Pending Ignore type change
+      description: Holds the recording index and interval identity until the dialog
+        confirms a reason or is dismissed. The shared viewport is not mutated by event-lane
+        drag or drop.
+    - ref: workflow-collapsed
+      name: Workflow sidebar collapse state
+      description: Window-local presentation state toggled only by the sidebar control;
+        keeps stage navigation available and is never persisted in project data.
     - ref: recordings-viewport-before-wizard
       name: Recordings viewport before Wizard
       description: Import-page-local pixel viewport captured before Mapping Wizard
@@ -618,6 +669,12 @@ modules:
         evidence.
     errors: []
     invariants:
+    - SPEC-0053 collapses WORKFLOW to a narrow navigation rail with complete stage
+      tooltips, unchanged availability and selection, and an always-visible expand
+      control. Expanded view restores stage names and session details.
+    - SPEC-0050 presents the read-only Normal Robot Motion lane as training activity
+      coverage including Pick and Put, while retaining the separate editable Pick/Put
+      lanes.
     - Qt framework types never enter L1 public contracts.
     - Long analysis never runs on the UI thread.
     - Waveform scene-graph textures are invalidated when channel data, the shared
@@ -661,6 +718,11 @@ modules:
     - Sensor mapping has independent per-IMU mutually exclusive existing-filtered/software-filtering
       options with raw bypass. Training names the three methods formally and keeps
       hover explanations available even when an algorithm is unavailable.
+    - SPEC-0048 writes one complete self-contained JSONL per confirmed recording under
+      a job-owned staging directory, then publishes the whole new batch without replacing
+      existing exports. Each file contains header, annotations, full sample blocks
+      and end/count/SHA-256; cancellation before publication leaves no successful
+      partial batch.
   entrypoints:
   - path: src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
     symbol: WaveformItem
@@ -683,6 +745,9 @@ modules:
     kind: class
   - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
     symbol: AtomicModelTextWriter
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicAnnotatedDataWriter
     kind: class
 - id: history_worker_adapter
   level: L3+
@@ -1102,8 +1167,8 @@ ports:
   contract: src/dual_imu_collision_studio/adapters/desktop/controller.py
   implemented_by: []
   description:
-    purpose: Publish the terminal outcome of one accepted background Replay CSV or
-      Model TXT export.
+    purpose: Publish terminal outcomes for accepted Replay CSV, Model TXT and annotated
+      dataset exports through one application output sink.
     data: Artifact kind plus saved destination path on success or a bounded failure
       message on failure.
     timing: async
@@ -1128,6 +1193,43 @@ ports:
       condition: Duplicate job identities or unsupported worker capacity.
   symbols:
   - LearningExecutionPort
+- id: workspace.annotated-export
+  owner: data_workspace
+  direction: input
+  kind: query
+  contract: src/dual_imu_collision_studio/domain/data_workspace/service.py
+  implemented_by: []
+  description:
+    purpose: Validate an immutable confirmed dataset and derive current-policy Normal
+      evidence.
+    data: Borrowed immutable dataset, typed channel/annotation/provenance values;
+      no Qt or JSON wire values.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-annotated-dataset
+      condition: Confirmation is stale, provisional or input shapes/provenance are
+        inconsistent.
+  symbols:
+  - prepare_annotated_export
+- id: workspace.annotated-file-output
+  owner: data_workspace
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Write a complete batch of independent self-contained recording files
+      with cooperative cancellation and final publication.
+    data: Borrowed immutable dataset, typed channel/annotation/provenance values;
+      no Qt or JSON wire values.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-annotated-dataset
+      condition: Confirmation is stale, provisional or input shapes/provenance are
+        inconsistent.
+  symbols:
+  - AnnotatedDataOutputPort
 events:
 - id: workspace.changed
   owner: data_workspace
@@ -1377,6 +1479,90 @@ events:
     - name: reason
       type: string
       meaning: Bounded user-visible failure message.
+    intended_consumers:
+    - desktop_adapter
+- id: annotations.exported
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job saved.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
+    intended_consumers:
+    - desktop_adapter
+- id: annotations.export-failed
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job failed.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
+    intended_consumers:
+    - desktop_adapter
+- id: annotations.export-cancelled
+  owner: studio_application
+  output_port: replay.events
+  delivery: at-most-once
+  envelope:
+  - event_type
+  - source
+  - correlation_id
+  - stream_id
+  - sequence
+  - payload
+  lifecycle:
+  - received
+  - validated
+  - processing
+  - succeeded
+  - failed
+  - cancelled
+  description:
+    purpose: Report one accepted annotated dataset job cancelled.
+    emitted_when: The worker terminal outcome is accepted for the current export_id
+      and UI busy state has already been cleared.
+    payload_fields:
+    - name: result
+      type: string
+      meaning: Saved batch path or bounded cancellation/failure reason.
     intended_consumers:
     - desktop_adapter
 types:
@@ -3698,7 +3884,9 @@ types:
   - filter-design
   - frozen-self-imu-model
   - deployment-qualification
-  fields: *id017
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  fields: []
 - id: learning-worker-signals
   owner: studio_application
   language: python
@@ -4178,8 +4366,328 @@ types:
     type: tuple
     role: metadata
     meaning: Logical row count and channel-major lag width; not a dense allocation.
+- id: annotated-export-channel
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ExportChannel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 ExportChannel: confirmed-only self-contained recording export
+    contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields:
+  - name: column_id
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: sensor
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: signal_kind
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: axis
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: array_column
+    type: int
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: source_column
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: source_mapping_role
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: configured_mode
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: unit
+    type: optional str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+- id: annotated-recording-snapshot
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedRecordingSnapshot
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedRecordingSnapshot: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - recording
+  - annotation-interval
+  - annotated-export-channel
+  fields:
+  - name: recording
+    type: Recording
+    role: domain-value
+    meaning: Confirmed borrowed recording; arrays are read-only for job lifetime.
+  - name: name
+    type: str
+    role: metadata
+    meaning: Display source name.
+  - name: worksheet
+    type: str
+    role: metadata
+    meaning: Source worksheet identity.
+  - name: mapping
+    type: Mapping
+    role: configuration
+    meaning: Frozen semantic source mapping and preprocessing settings.
+  - name: channels
+    type: tuple ExportChannel
+    role: configuration
+    meaning: Ordered actual sensor/signal descriptors.
+  - name: interpolated_indices
+    type: tuple int
+    role: metadata
+    meaning: Inserted indexes on aligned timeline.
+  - name: import_warnings
+    type: tuple str
+    role: metadata
+    meaning: Original import warnings.
+  - name: normal_intervals
+    type: tuple AnnotationInterval
+    role: domain-value
+    meaning: Derived existing-policy Normal evidence.
+- id: annotated-dataset-snapshot
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedDatasetSnapshot
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedDatasetSnapshot: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - annotated-recording-snapshot
+  fields:
+  - name: recordings
+    type: tuple AnnotatedRecordingSnapshot
+    role: domain-value
+    meaning: All confirmed recordings of one consistent session.
+  - name: export_id
+    type: str
+    role: domain-identity
+    meaning: One in-process correlation identity.
+  - name: created_at
+    type: str
+    role: metadata
+    meaning: UTC capture timestamp.
+  - name: studio_version
+    type: str
+    role: metadata
+    meaning: Application release version.
+  - name: project_name
+    type: str
+    role: metadata
+    meaning: Session display name.
+  - name: annotations_ready
+    type: bool
+    role: contract-control
+    meaning: True only after successful still-valid confirmation.
+- id: annotated-data-output-port
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: AnnotatedDataOutputPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: 'SPEC-0048 AnnotatedDataOutputPort: confirmed-only self-contained recording
+    export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - annotated-dataset-snapshot
+  fields: []
+- id: annotated-export-cancelled
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedExportCancelled
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedExportCancelled: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields: []
+- id: atomic-annotated-data-writer
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicAnnotatedDataWriter
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: 'SPEC-0048 AtomicAnnotatedDataWriter: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - desktop_adapter
+  - studio_application
+  references:
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  - annotated-export-cancelled
+  fields: []
+- id: annotated-data-export-signals
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _AnnotatedDataExportSignals
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: 'SPEC-0048 _AnnotatedDataExportSignals: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references: []
+  fields: []
+- id: annotated-data-export-worker
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _AnnotatedDataExportWorker
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: 'SPEC-0048 _AnnotatedDataExportWorker: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  - annotated-data-export-signals
+  fields:
+  - name: _progress_counts
+    type: tuple[int, int]
+    role: runtime-state
+    meaning: Worker is the only writer; UI reads one replaced immutable pair without
+      queued per-chunk events.
+  - name: export_id
+    type: str
+    role: metadata
+    meaning: Immutable accepted-job identity checked by the UI terminal receiver.
+  - name: _cancel
+    type: threading.Event
+    role: runtime-state
+    meaning: UI may request cancellation; worker observes between bounded blocks.
+  - name: _dataset
+    type: AnnotatedDatasetSnapshot
+    role: domain-value
+    meaning: Private immutable snapshot binding.
+  - name: _writer
+    type: AnnotatedDataOutputPort
+    role: adapter-binding
+    meaning: Concrete technology bound only by L0.
+  - name: signals
+    type: Qt signals
+    role: framework-handle
+    meaning: Private queued bridge; worker never updates controller runtime.
+  - name: _destination
+    type: str
+    role: metadata
+    meaning: User-selected existing parent folder.
 type_exclusions: []
 state_objects:
+- id: workflow-collapsed
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: workflowCollapsed
+    storage: file-static
+  type: bool
+  visibility: private
+  lifetime: One main window; initially expanded and not persisted.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: pending-ignore-relabel
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: pendingIgnoreRelabel
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One cross-lane Ignore confirmation dialog. Cleared when the dialog closes.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
 - id: json-export-queue
   owner: desktop_adapter
   language: qml
@@ -4435,6 +4943,21 @@ boundary_mappings:
   forbidden_edges:
   - data_workspace->learning_qualification
   - learning_qualification->data_workspace
+- id: training-activity-to-desktop
+  interaction: Parent maps the Learning-owned pure training activity mask into read-only
+    Normal Robot Motion start/end fractions, including Pick and Put while preserving
+    exclusive activity truth, selected-recording scope and individual Cycle boundaries.
+  producer: learning_qualification
+  consumer: studio_application
+  parent: studio_application
+  producer_contract: learning-service
+  consumer_contract: studio-controller
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->learning_qualification
+  forbidden_edges:
+  - learning_qualification->studio_application
 - id: learning-settings-to-project
   interaction: Map editable next-run Learning settings and immutable captured run
     provenance to or from project-owned semantic values, applying explicit fixed-grid
@@ -4468,6 +4991,21 @@ boundary_mappings:
   forbidden_edges:
   - learning_qualification->profile_export
   - profile_export->learning_qualification
+- id: session-to-annotated-snapshot
+  interaction: Parent-private session rows are copied into workspace-owned immutable
+    export metadata; downstream adapter legally consumes that same workspace contract
+    through its demand-owned output Port without a second DTO.
+  producer: studio_application
+  consumer: data_workspace
+  parent: studio_application
+  producer_contract: studio-controller
+  consumer_contract: annotated-dataset-snapshot
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->data_workspace
+  forbidden_edges:
+  - data_workspace->studio_application
 flows:
 - id: manage-project
   owner: studio_application
@@ -4805,6 +5343,75 @@ flows:
     event: model.export-failed
     handling: Preserve any previous destination and report the bounded failure message
       on the UI thread.
+- id: export-annotated-data
+  owner: studio_application
+  description: Export every confirmed recording as an independently analyzable JSONL
+    without Training or model inputs.
+  trigger:
+    kind: command
+    ref: workspace.annotated-export
+    description: User chooses an existing output parent folder after Confirm All.
+  steps:
+  - id: export-annotated-data.step-1
+    order: 1
+    module: studio_application
+    action: Reject unconfirmed/busy inputs; capture current immutable metadata and
+      borrowed arrays once, lock mutation and dispatch one background job.
+    receives:
+    - workspace.annotated-export
+    emits: []
+    state_changes: []
+    side_effects:
+    - Schedule a worker and guard mutation.
+  - id: export-annotated-data.step-2
+    order: 2
+    module: data_workspace
+    action: Validate complete confirmed recordings and provenance, and derive existing-policy
+      Normal evidence without altering annotations.
+    receives:
+    - workspace.annotated-export
+    emits: []
+    state_changes: []
+    side_effects: []
+  - id: export-annotated-data.step-3
+    order: 3
+    module: desktop_adapter
+    action: Stream each self-contained JSONL with end/count/digest into one new staging
+      directory; cancel or fail safely; publish only after all files finish.
+    receives:
+    - workspace.annotated-file-output
+    emits: []
+    state_changes: []
+    side_effects:
+    - Create and publish a new job-owned batch directory.
+  - id: export-annotated-data.step-4
+    order: 4
+    module: studio_application
+    action: Receive queued outcome for current export_id, clear busy and references,
+      then publish exactly one terminal result; deferred close can resume.
+    receives: []
+    emits:
+    - annotations.exported
+    - annotations.export-failed
+    - annotations.export-cancelled
+    state_changes: []
+    side_effects: []
+  success:
+    result: Every confirmed recording has one complete self-contained file in a new
+      visible batch folder.
+    events:
+    - annotations.exported
+  errors:
+  - condition: Confirmation is unavailable or work is mutually exclusive.
+    event: annotations.export-failed
+    handling: Reject before work; preserve the session.
+  - condition: Validation, file output or publication fails.
+    event: annotations.export-failed
+    handling: Clean only verified job-owned staging files; preserve sources and existing
+      exports.
+  - condition: Cancellation is observed before publication.
+    event: annotations.export-cancelled
+    handling: Release job resources and do not publish a partial batch.
 adr_exceptions: []
 c_analyzer:
   ast:
@@ -4935,6 +5542,20 @@ workloads:
   data:
     volume: One selected candidate with scalar metadata, nine times tap_count FIR
       coefficients, and three three-axis vector sections.
+  budgets: []
+- id: annotated-data-write
+  flow: export-annotated-data
+  steps:
+  - export-annotated-data.step-1
+  - export-annotated-data.step-2
+  - export-annotated-data.step-3
+  - export-annotated-data.step-4
+  timing_class: best-effort
+  activation:
+    kind: command
+  data:
+    volume: All confirmed recording rows; one reusable JSONL sample block plus metadata/annotations,
+      no full waveform or artifact copy.
   budgets: []
 execution_profiles:
 - id: windows-desktop
@@ -5127,6 +5748,23 @@ execution_mappings:
   reentrant: false
   activation: Model TXT export command
   wcet: Data-dependent and bounded by tap_count and local filesystem behavior.
+- id: annotated-data-map
+  profile: windows-desktop
+  workload: annotated-data-write
+  steps:
+  - export-annotated-data.step-1
+  - export-annotated-data.step-2
+  - export-annotated-data.step-3
+  - export-annotated-data.step-4
+  units:
+  - qt-ui-thread
+  - replay-export-worker
+  serialization: One active mutually exclusive snapshot; queued progress is coalesced
+    on the UI thread and terminal delivery is at-most-once.
+  reentrant: false
+  activation: Confirmed annotated-data export command
+  wcet: Not established; best-effort local sequential formatting and filesystem I/O,
+    no real-time deadline claim.
 execution_channels:
 - id: history-worker-ipc
   profile: windows-desktop
@@ -5176,6 +5814,19 @@ execution_channels:
   ordering: One selected candidate snapshot per accepted export command
   copy_policy: Immutable candidate parameters are shared read-only within the process;
     only bounded line text is copied to file buffers.
+  timeout_ms: 0
+  overload: reject
+- id: annotated-data-command
+  profile: windows-desktop
+  from_unit: qt-ui-thread
+  to_unit: replay-export-worker
+  contract_refs:
+  - workspace.annotated-export
+  - workspace.annotated-file-output
+  capacity: 1
+  ordering: One accepted immutable all-recording snapshot per job.
+  copy_policy: Arrays borrowed read-only; metadata and annotation tuples copied; bounded
+    row buffers only.
   timeout_ms: 0
   overload: reject
 data_access_profiles:

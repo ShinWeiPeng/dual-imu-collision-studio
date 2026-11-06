@@ -44,6 +44,7 @@ manifest_record:
     side_effects: []
     errors: []
     invariants:
+    - SPEC-0050 exposes the existing Cycle-contained Normal/Pick/Put activity mask as a pure query shared by fitting and the parent-owned training-range projection; Ignore and actual Collision subtraction, interval counts, cycle segmentation and model-specific eligibility retain their original semantics.
     - Qualification always replays all supplied speeds.
     - Qualification always replays all supplied offsets, including offsets excluded
       from subsequent fitting rounds.

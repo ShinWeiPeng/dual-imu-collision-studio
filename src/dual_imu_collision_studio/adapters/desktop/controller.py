@@ -17,7 +17,8 @@ import json
 from copy import deepcopy
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from uuid import uuid4
 from dataclasses import asdict, replace
 from pathlib import Path
 from threading import Event
@@ -35,7 +36,13 @@ from PySide6.QtCore import (
     Slot,
 )
 
+from ... import __version__
+from ...domain.data_workspace.contracts import AnnotatedDataOutputPort
 from ...domain.data_workspace.model import (
+    ExportChannel,
+    AnnotatedRecordingSnapshot,
+    AnnotatedDatasetSnapshot,
+    AnnotatedExportCancelled,
     ActivityKind,
     AnnotationInterval,
     AnnotationTemplate,
@@ -90,7 +97,11 @@ from ...domain.process_diagnostics.contracts import DiagnosticsPort, NullDiagnos
 from ...domain.process_diagnostics.model import DiagnosticStatus, LearningTimingEvidence
 from .profile_writer import AtomicProfileWriter
 from .project_store import AtomicProjectStore
-from .replay_writer import AtomicModelTextWriter, AtomicReplayCsvWriter
+from .replay_writer import (
+    AtomicAnnotatedDataWriter,
+    AtomicModelTextWriter,
+    AtomicReplayCsvWriter,
+)
 from ..parallel.learning_workers import SpawnLearningExecutor
 from ..tabular.reader import TabularReader
 
@@ -350,9 +361,62 @@ class _ProjectSourceMissing(FileNotFoundError):
         self.source_name = source_name
 
 
+class _AnnotatedDataExportSignals(QObject):
+    completed = Signal(str, str)
+    failed = Signal(str, str)
+    cancelled = Signal(str)
+
+
+class _AnnotatedDataExportWorker(QRunnable):
+    def __init__(
+        self,
+        writer: AnnotatedDataOutputPort,
+        dataset: AnnotatedDatasetSnapshot,
+        destination: str,
+    ):
+        super().__init__()
+        self.signals = _AnnotatedDataExportSignals()
+        self.export_id = dataset.export_id
+        self._writer = writer
+        self._dataset = dataset
+        self._destination = destination
+        self._cancel = Event()
+        self._progress_counts = (
+            0,
+            sum(len(x.recording.time_s) for x in dataset.recordings),
+        )
+
+    def cancel(self):
+        self._cancel.set()
+
+    def progress_snapshot(self):
+        return self._progress_counts
+
+    def _update_progress(self, done, total):
+        self._progress_counts = (done, total)
+
+    def run(self):
+        try:
+            path = self._writer.write(
+                self._destination,
+                self._dataset,
+                cancelled=self._cancel.is_set,
+                progress=self._update_progress,
+            )
+        except AnnotatedExportCancelled:
+            self.signals.cancelled.emit(self.export_id)
+        except Exception as exc:
+            self.signals.failed.emit(
+                self.export_id, f"{type(exc).__name__}: {exc}"[:2000]
+            )
+        else:
+            self.signals.completed.emit(self.export_id, path)
+
+
 class StudioController(QObject):
     stateChanged = Signal()
     jsonExportFinished = Signal(str)
+    annotationExportFinished = Signal(str)
 
     STAGES = (
         "Import & Map",
@@ -362,8 +426,21 @@ class StudioController(QObject):
         "Export Profile",
     )
 
-    def __init__(self, diagnostics: DiagnosticsPort | None = None) -> None:
+    def __init__(
+        self,
+        diagnostics: DiagnosticsPort | None = None,
+        *,
+        annotated_writer: AnnotatedDataOutputPort | None = None,
+    ) -> None:
         super().__init__()
+        self._annotated_writer = annotated_writer or AtomicAnnotatedDataWriter()
+        self._annotated_export_worker: _AnnotatedDataExportWorker | None = None
+        self._annotated_export_progress = 0.0
+        self._annotated_export_timer = QTimer(self)
+        self._annotated_export_timer.setInterval(100)
+        self._annotated_export_timer.timeout.connect(
+            self._poll_annotated_export_progress
+        )
         self._diagnostics = diagnostics or NullDiagnostics()
         self._diagnostic_status = getattr(
             self._diagnostics, "status", DiagnosticStatus()
@@ -471,6 +548,222 @@ class StudioController(QObject):
         self._learning_worker: LearningWorker | None = None
         self._replay_export_worker: _ReplayCsvExportWorker | None = None
         self._model_export_worker: _ModelTextExportWorker | None = None
+
+    @Property(bool, notify=stateChanged)
+    def annotationExportActive(self) -> bool:
+        return self._annotated_export_worker is not None
+
+    @Property(float, notify=stateChanged)
+    def annotationExportProgress(self) -> float:
+        return self._annotated_export_progress
+
+    def _annotation_confirmation_current(self) -> bool:
+        workspace = self._confirmed_workspace
+        if not self._annotations_ready or workspace is None or not self._recordings:
+            return False
+        if len(workspace.recordings) != len(self._recordings):
+            return False
+        for index, recording in enumerate(workspace.recordings):
+            row = self._recordings[index]
+            samples = self._samples.get(index)
+            if (
+                samples is None
+                or row.get("mappingStatus") != "Confirmed"
+                or not row.get("mapping")
+                or recording.recording_id != self._recording_id_for_index(index, row)
+                or self._annotations.get(index, ()) != recording.annotations
+                or getattr(samples, "discontinuity_before", None)
+                is not recording.discontinuity_before
+                or row["mapping"].get("single_sensor") != recording.single_sensor
+                or any(item.provisional for item in recording.annotations)
+                or samples.time_s is not recording.time_s
+                or samples.internal_imu is not recording.internal_imu
+                or samples.external_imu is not recording.external_imu
+                or row.get("sampleRateValue") != recording.sample_rate_hz
+                or row.get("speed") != recording.condition.robot_speed_mm_s
+                or row.get("offset") != recording.condition.collision_offset_mm
+            ):
+                return False
+        return True
+
+    @Property(bool, notify=stateChanged)
+    def canExportAnnotatedData(self) -> bool:
+        return (
+            not self.annotationExportActive
+            and self._learning_worker is None
+            and not self.qualificationValidationActive
+            and not self.jsonExportActive
+            and not self.replayExportActive
+            and not self.modelExportActive
+            and not self.projectRelinkRequired
+            and not self._pending_export_artifacts
+            and self._annotation_confirmation_current()
+        )
+
+    def _capture_annotated_dataset(self) -> AnnotatedDatasetSnapshot:
+        entries = []
+        for index, recording in enumerate(self._confirmed_workspace.recordings):
+            row = self._recordings[index]
+            samples = self._samples[index]
+            mapping = deepcopy(row["mapping"])
+            channels = []
+            descriptors = self._signal_descriptors(row)
+            for sensor in ("internal", "external"):
+                values = getattr(recording, sensor + "_imu")
+                if values is None:
+                    continue
+                if mapping.get("signal_mapping_schema") in (1, 2):
+                    offset = 0
+                    for kind, group in self._signal_groups(descriptors[sensor]).items():
+                        raw = group.get("raw_columns") or []
+                        primary = raw or group.get("filtered_columns") or []
+                        for axis_index, source in enumerate(primary):
+                            axis = "xyz"[axis_index]
+                            channels.append(
+                                ExportChannel(
+                                    f"{sensor}.{'a' if kind == 'accelerometer' else 'g'}{axis}",
+                                    sensor,
+                                    kind,
+                                    axis,
+                                    offset + axis_index,
+                                    str(source),
+                                    "raw" if raw else "filtered",
+                                    str(group.get("mode", "raw")),
+                                )
+                            )
+                        offset += len(primary)
+                else:
+                    # Old mappings do not distinguish three gyro axes from three accel axes.
+                    sources = mapping.get(sensor + "_columns", ())
+                    settings = mapping.get("preprocessing") or {}
+                    mode = (
+                        settings.get("source_mode", "raw")
+                        if mapping.get("single_sensor") == sensor
+                        else "raw"
+                    )
+                    for column_index, source in enumerate(sources):
+                        channels.append(
+                            ExportChannel(
+                                f"{sensor}.c{column_index}",
+                                sensor,
+                                "unknown",
+                                "xyz"[column_index % 3],
+                                column_index,
+                                str(source),
+                                "filtered" if mode == "already_filtered" else "legacy",
+                                str(mode),
+                            )
+                        )
+            entries.append(
+                AnnotatedRecordingSnapshot(
+                    recording,
+                    str(row["name"]),
+                    str(row.get("worksheet", "")),
+                    mapping,
+                    tuple(channels),
+                    tuple(int(i) for i in getattr(samples, "interpolated_indices", ())),
+                    tuple(getattr(samples, "warnings", row.get("importWarnings", ()))),
+                )
+            )
+        return AnnotatedDatasetSnapshot(
+            tuple(entries),
+            uuid4().hex,
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            __version__,
+            self.projectName if self._project_path is not None else "studio",
+            True,
+        )
+
+    @Slot(QUrl, result=bool)
+    def exportAnnotatedData(self, destination: QUrl) -> bool:
+        if not self.canExportAnnotatedData:
+            self._status_message = "Confirm All Annotation Sets and finish active work before exporting annotated data."
+            self.stateChanged.emit()
+            return False
+        try:
+            if not destination.isLocalFile():
+                raise ValueError("Choose a local annotated data folder")
+            parent = Path(destination.toLocalFile()).resolve()
+            if not parent.is_dir():
+                raise ValueError("Annotated export parent folder must exist")
+            dataset = self._capture_annotated_dataset()
+            worker = _AnnotatedDataExportWorker(
+                self._annotated_writer, dataset, str(parent)
+            )
+        except (OSError, ValueError, TypeError, KeyError, IndexError) as exc:
+            self._status_message = f"Annotated data export unavailable: {exc}"
+            self.stateChanged.emit()
+            return False
+        worker.signals.completed.connect(self._on_annotated_export_completed)
+        worker.signals.failed.connect(self._on_annotated_export_failed)
+        worker.signals.cancelled.connect(self._on_annotated_export_cancelled)
+        self._annotated_export_worker = worker
+        self._annotated_export_progress = 0.0
+        self._status_message = (
+            f"Exporting annotated data for {len(dataset.recordings)} recording(s)…"
+        )
+        self._annotated_export_timer.start()
+        self.stateChanged.emit()
+        QThreadPool.globalInstance().start(worker)
+        return True
+
+    @Slot()
+    def cancelAnnotatedDataExport(self) -> None:
+        if self._annotated_export_worker is not None:
+            self._annotated_export_worker.cancel()
+            self._status_message = "Cancelling annotated data export…"
+            self.stateChanged.emit()
+
+    def _poll_annotated_export_progress(self) -> None:
+        if self._annotated_export_worker is not None:
+            done, total = self._annotated_export_worker.progress_snapshot()
+            value = done / total if total else 0.0
+            if value != self._annotated_export_progress:
+                self._annotated_export_progress = value
+                self.stateChanged.emit()
+
+    def _finish_annotated_export(
+        self, identity: str, outcome: str, message: str
+    ) -> None:
+        if (
+            self._annotated_export_worker is None
+            or self._annotated_export_worker.export_id != identity
+        ):
+            return
+        self._annotated_export_timer.stop()
+        self._annotated_export_worker = None
+        if outcome == "saved":
+            self._annotated_export_progress = 1.0
+        self._status_message = message
+        self.stateChanged.emit()
+        self.annotationExportFinished.emit(outcome)
+
+    @Slot(str, str)
+    def _on_annotated_export_completed(self, identity: str, path: str) -> None:
+        self._finish_annotated_export(
+            identity, "saved", f"Saved annotated data: {path}"
+        )
+
+    @Slot(str, str)
+    def _on_annotated_export_failed(self, identity: str, reason: str) -> None:
+        self._finish_annotated_export(
+            identity, "failed", f"Annotated data export failed: {reason}"
+        )
+
+    @Slot(str)
+    def _on_annotated_export_cancelled(self, identity: str) -> None:
+        self._finish_annotated_export(
+            identity,
+            "cancelled",
+            "Annotated data export cancelled; no batch published.",
+        )
+
+    def _reject_annotated_export_change(self) -> bool:
+        if not self.annotationExportActive:
+            return False
+        self._status_message = "Finish or cancel annotated data export before changing data or starting other work."
+        self.stateChanged.emit()
+        return True
 
     @Property(bool, notify=stateChanged)
     def projectDirty(self) -> bool:
@@ -838,16 +1131,31 @@ class StudioController(QObject):
             return []
         recording = self._confirmed_workspace.recordings[self._selected_recording]
         sample_count = len(recording.time_s)
-        return [
-            {
-                "startFraction": interval.start_index / sample_count,
-                "endFraction": interval.end_index / sample_count,
-            }
-            for interval in self._workspace.derive_normal_intervals(
-                recording,
-                collision_response_window_s=self._learning.COLLISION_DETECTION_WINDOW_S,
+        eligible = self._learning.training_activity_mask(
+            sample_count, self._learning_intervals(recording)
+        )
+        projected = []
+        for cycle in recording.annotations:
+            if cycle.kind is not ActivityKind.CYCLE:
+                continue
+            boundaries = (
+                np.flatnonzero(
+                    np.diff(
+                        np.r_[
+                            False, eligible[cycle.start_index : cycle.end_index], False
+                        ]
+                    )
+                )
+                + cycle.start_index
             )
-        ]
+            for start, end in zip(boundaries[::2], boundaries[1::2]):
+                projected.append(
+                    {
+                        "startFraction": float(start) / sample_count,
+                        "endFraction": float(end) / sample_count,
+                    }
+                )
+        return projected
 
     @Property(bool, notify=stateChanged)
     def canUndoAnnotation(self) -> bool:
@@ -977,12 +1285,17 @@ class StudioController(QObject):
 
     @Property(bool, notify=stateChanged)
     def learningSettingsLocked(self):
-        return self._learning_worker is not None or self._run_state in {
-            "Learning",
-            "Qualifying",
-            "Refining Speed Range",
-            "Cancelling",
-        }
+        return (
+            self.annotationExportActive
+            or self._learning_worker is not None
+            or self._run_state
+            in {
+                "Learning",
+                "Qualifying",
+                "Refining Speed Range",
+                "Cancelling",
+            }
+        )
 
     @Slot(str, "QVariant", result=bool)
     def setLearningSetting(self, name, value):
@@ -1900,6 +2213,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def exportReplayCsv(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self.singleImuMode:
             self._status_message = (
                 "Single-IMU export is unavailable in this desktop-simulation version."
@@ -1952,6 +2267,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def exportModelTxt(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self.singleImuMode:
             self._status_message = (
                 "Single-IMU export is unavailable in this desktop-simulation version."
@@ -2044,6 +2361,8 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def newProject(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self.jsonExportActive or self.qualificationValidationActive:
             self._status_message = (
                 "Finish active export or Qualification before changing project."
@@ -2148,6 +2467,8 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def saveProject(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self._project_path is None:
             self._status_message = "Choose Save Project As for this untitled project."
             self.stateChanged.emit()
@@ -2156,6 +2477,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def saveProjectAs(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         path = self._path_from_url(value)
         if path.suffix.lower() != ".dicsproj":
             path = path.with_suffix(".dicsproj")
@@ -2163,6 +2486,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def openProject(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self.jsonExportActive or self.qualificationValidationActive:
             self._status_message = (
                 "Finish active export or Qualification before changing project."
@@ -2206,6 +2531,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def relinkProjectFile(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not self.projectRelinkRequired:
             return False
         index = self._pending_project_missing_index
@@ -2227,6 +2554,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=bool)
     def relinkProjectFolder(self, value: QUrl) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not self.projectRelinkRequired:
             return False
         folder = self._path_from_url(value)
@@ -2257,6 +2586,8 @@ class StudioController(QObject):
 
     @Slot()
     def cancelProjectRelink(self) -> None:
+        if self._reject_annotated_export_change():
+            return
         self._clear_pending_project_open()
         self._status_message = (
             "Project open cancelled; the active session was not changed."
@@ -2265,6 +2596,8 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def useSelectedCycleAsReference(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not self.canUseSelectedCycleAsReference:
             self._annotation_blocker_message = (
                 "Select one complete valid Cycle before Use as Reference."
@@ -2346,6 +2679,8 @@ class StudioController(QObject):
 
     @Slot(int, result=bool)
     def removeRecording(self, index: int) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not 0 <= index < len(self._recordings):
             return False
         if self._learning_worker is not None:
@@ -2385,6 +2720,8 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def confirmIntentionalDuplicates(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         duplicate_keys = set(self._duplicate_condition_groups())
         if not duplicate_keys:
             return False
@@ -2398,6 +2735,8 @@ class StudioController(QObject):
 
     @Slot("QVariantList", result=int)
     def importFiles(self, values: list[object]) -> int:
+        if self._reject_annotated_export_change():
+            return -1
         first_imported_index = len(self._recordings)
         self._annotations_ready = False
         self._confirmed_workspace = None
@@ -2457,6 +2796,8 @@ class StudioController(QObject):
 
     @Slot(QUrl, result=int)
     def importFile(self, value: QUrl) -> int:
+        if self._reject_annotated_export_change():
+            return -1
         return self.importFiles([value])
 
     @Slot(
@@ -2485,6 +2826,8 @@ class StudioController(QObject):
         preprocessing=None,
         signal_mapping=None,
     ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self._selected_recording < 0:
             return False
         row = self._recordings[self._selected_recording]
@@ -2686,6 +3029,8 @@ class StudioController(QObject):
 
     @Slot("QVariantMap", result=bool)
     def confirmSignalMapping(self, request):
+        if self._reject_annotated_export_change():
+            return False
         if self.learningSettingsLocked or self._selected_recording < 0:
             return False
         try:
@@ -2987,6 +3332,8 @@ class StudioController(QObject):
 
     @Slot("QVariantMap", "QVariantMap", result=bool)
     def confirmSingleImuMapping(self, request, adopted):
+        if self._reject_annotated_export_change():
+            return False
         try:
             settings = settings_from_data(dict(adopted))
             if (
@@ -3034,6 +3381,8 @@ class StudioController(QObject):
 
     @Slot(str)
     def setNumericType(self, value: str) -> None:
+        if self._reject_annotated_export_change():
+            return
         if value not in {"float32", "float64", ""}:
             return
         if self._run_state in {
@@ -3057,6 +3406,8 @@ class StudioController(QObject):
     def createAnnotation(
         self, kind_text: str, start_fraction: float, end_fraction: float, reason: str
     ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self._selected_recording < 0 or self._selected_sample_count() == 0:
             return False
         try:
@@ -3146,6 +3497,8 @@ class StudioController(QObject):
     def commitAnnotationGesture(
         self, index: int, additive: bool, moved: bool, delta_fraction: float
     ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         values = self._annotations.get(self._selected_recording, ())
         if not 0 <= index < len(values):
             return False
@@ -3173,6 +3526,8 @@ class StudioController(QObject):
     def moveSelectedAnnotations(
         self, _start_fraction: float, delta_fraction: float
     ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         values = list(self._annotations.get(self._selected_recording, ()))
         selected = sorted(
             index for index in self._selected_annotations if 0 <= index < len(values)
@@ -3220,6 +3575,8 @@ class StudioController(QObject):
     def updateAnnotation(
         self, index: int, start_fraction: float, end_fraction: float
     ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         values = list(self._annotations.get(self._selected_recording, ()))
         if not 0 <= index < len(values):
             return False
@@ -3246,8 +3603,58 @@ class StudioController(QObject):
         self.stateChanged.emit()
         return True
 
+    @Slot(int, str, str, str, result=bool)
+    def relabelAnnotation(
+        self, recording_index: int, interval_id: str, kind_text: str, reason: str
+    ) -> bool:
+        if self._reject_annotated_export_change():
+            return False
+        if recording_index != self._selected_recording:
+            return False
+        values = list(self._annotations.get(recording_index, ()))
+        index = next(
+            (
+                i
+                for i, interval in enumerate(values)
+                if interval.interval_id == interval_id
+            ),
+            None,
+        )
+        if index is None:
+            return False
+        current = values[index]
+        try:
+            kind = self._activity_kind(kind_text)
+            if current.kind is kind or ActivityKind.CYCLE in (current.kind, kind):
+                return False
+            replacement = replace(
+                current,
+                kind=kind,
+                reason=(reason.strip() or None)
+                if kind is ActivityKind.IGNORE
+                else None,
+                provisional=False,
+                source_recording_id=None,
+                source_cycle_index=None,
+            )
+        except ValueError as exc:
+            self._status_message = str(exc)
+            self.stateChanged.emit()
+            return False
+        self._push_annotation_history()
+        values[index] = replacement
+        self._annotations[recording_index] = tuple(values)
+        self._selected_annotation = index
+        self._selected_annotations = {index}
+        self._invalidate_annotation_truth()
+        self._status_message = f"Changed {current.kind.value} to {kind.value}."
+        self.stateChanged.emit()
+        return True
+
     @Slot()
     def deleteSelectedAnnotation(self) -> None:
+        if self._reject_annotated_export_change():
+            return
         values = list(self._annotations.get(self._selected_recording, ()))
         if not 0 <= self._selected_annotation < len(values):
             return
@@ -3262,6 +3669,8 @@ class StudioController(QObject):
 
     @Slot()
     def undoAnnotation(self) -> None:
+        if self._reject_annotated_export_change():
+            return
         history = self._annotation_undo.get(self._selected_recording, [])
         if not history:
             return
@@ -3275,6 +3684,8 @@ class StudioController(QObject):
 
     @Slot()
     def redoAnnotation(self) -> None:
+        if self._reject_annotated_export_change():
+            return
         history = self._annotation_redo.get(self._selected_recording, [])
         if not history:
             return
@@ -3288,6 +3699,8 @@ class StudioController(QObject):
 
     @Slot(result=bool)
     def confirmAnnotations(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         recordings: list[Recording] = []
         for index, row in enumerate(self._recordings):
             try:
@@ -3337,6 +3750,8 @@ class StudioController(QObject):
 
     @Slot()
     def startLearning(self) -> None:
+        if self._reject_annotated_export_change():
+            return
         if self.jsonExportActive or self.qualificationValidationActive:
             return
         if not self.canStartLearning:
@@ -3634,6 +4049,8 @@ class StudioController(QObject):
 
     @Slot()
     def requalifySelected(self):
+        if self._reject_annotated_export_change():
+            return
         candidate = self._current_candidate()
         if candidate is not None:
             self.requalifyKernel(candidate.candidate_id)
@@ -3787,6 +4204,8 @@ class StudioController(QObject):
 
     @Slot(str, result=bool)
     def requalifyKernel(self, kernel_id: str) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if (
             self._qualification_worker is not None
             or self.jsonExportActive
@@ -4009,6 +4428,8 @@ class StudioController(QObject):
 
     @Slot(str, result="QVariantList")
     def prepareJsonExport(self, kernel_id: str) -> list[dict]:
+        if self._reject_annotated_export_change():
+            return []
         profile = next((p for p in self._profiles if p.kernel_id == kernel_id), None)
         if profile is None:
             self._status_message = (
@@ -4033,6 +4454,8 @@ class StudioController(QObject):
 
     @Slot(result="QVariantList")
     def prepareJsonExports(self) -> list[dict]:
+        if self._reject_annotated_export_change():
+            return []
         rows = []
         try:
             for profile in self._profiles:
@@ -4081,6 +4504,8 @@ class StudioController(QObject):
 
     @Slot(str, str, QUrl, bool, result=str)
     def exportJsonModel(self, kernel_id, model_name, destination, replace):
+        if self._reject_annotated_export_change():
+            return "error"
         if (
             self.jsonExportActive
             or self.qualificationValidationActive
@@ -4139,6 +4564,8 @@ class StudioController(QObject):
 
     @Slot(str, result=bool)
     def prepareSelectedExport(self, url_text: str) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not self.canExportSelected:
             self._status_message = (
                 "Only current, selected, qualified kernels can be exported."
@@ -4180,6 +4607,8 @@ class StudioController(QObject):
 
     @Slot(bool, result=bool)
     def resolveExportConflict(self, replace: bool) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if not self._pending_export_conflicts:
             return False
         filename = self._pending_export_conflicts.pop(0)
@@ -5960,25 +6389,7 @@ class StudioController(QObject):
                 if mapping_data.get("single_sensor")
                 else None
             )
-            cycles = tuple(
-                item
-                for item in recording.annotations
-                if item.kind is ActivityKind.CYCLE
-            )
-            evidence = tuple(
-                self._map_learning_interval(interval, cycles)
-                for interval in (
-                    tuple(
-                        item
-                        for item in recording.annotations
-                        if item.kind is not ActivityKind.CYCLE
-                    )
-                    + self._workspace.derive_normal_intervals(
-                        recording,
-                        collision_response_window_s=self._learning.COLLISION_DETECTION_WINDOW_S,
-                    )
-                )
-            )
+            evidence = self._learning_intervals(recording)
             discontinuities = recording.discontinuity_before
             if discontinuities is None:
                 discontinuities = np.zeros(len(recording.time_s), dtype=np.bool_)
@@ -5999,6 +6410,25 @@ class StudioController(QObject):
         dataset = LearningDataset(tuple(mapped))
         self._learning.validate_dataset(dataset)
         return dataset
+
+    def _learning_intervals(self, recording: Recording) -> tuple[LearningInterval, ...]:
+        cycles = tuple(
+            item for item in recording.annotations if item.kind is ActivityKind.CYCLE
+        )
+        return tuple(
+            self._map_learning_interval(interval, cycles)
+            for interval in (
+                tuple(
+                    item
+                    for item in recording.annotations
+                    if item.kind is not ActivityKind.CYCLE
+                )
+                + self._workspace.derive_normal_intervals(
+                    recording,
+                    collision_response_window_s=self._learning.COLLISION_DETECTION_WINDOW_S,
+                )
+            )
+        )
 
     @staticmethod
     def _map_learning_interval(
@@ -6228,6 +6658,8 @@ class StudioController(QObject):
         return dataset.recordings[index]
 
     def _commit_pending_export(self) -> bool:
+        if self._reject_annotated_export_change():
+            return False
         if self._pending_export_folder is None:
             return False
         saved: list[str] = []

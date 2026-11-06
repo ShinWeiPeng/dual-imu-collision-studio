@@ -43,3 +43,4 @@ documents:
 - architecture/designs/catalog/platform_variants.md
 - architecture/designs/catalog/realtime_scheduling_studies.md
 - architecture/designs/catalog/validation_profiles.md
+- architecture/designs/flows/export-annotated-data.md

@@ -29,11 +29,13 @@ manifest_record:
   - process_diagnostics
   - profile_export
   - learning_qualification
+  - data_workspace
   implements_ports:
   - diagnostics.output
   - profile.file-output
   - learning.replay-file-output
   - learning.model-file-output
+  - workspace.annotated-file-output
   description:
     purpose: Present the Qt Quick interface, execute analysis and large artifact exports
       off the UI thread, and atomically write approved header, Replay CSV, and Model
@@ -42,6 +44,15 @@ manifest_record:
     output_ports: []
     emitted_events: []
     owned_state:
+    - ref: pending-ignore-relabel
+      name: Pending Ignore type change
+      description: Holds the recording index and interval identity until the dialog
+        confirms a reason or is dismissed. The shared viewport is not mutated by
+        event-lane drag or drop.
+    - ref: workflow-collapsed
+      name: Workflow sidebar collapse state
+      description: Window-local presentation state toggled only by the sidebar control;
+        keeps stage navigation available and is never persisted in project data.
     - ref: recordings-viewport-before-wizard
       name: Recordings viewport before Wizard
       description: Import-page-local pixel viewport captured before Mapping Wizard
@@ -57,6 +68,10 @@ manifest_record:
         evidence.
     errors: []
     invariants:
+    - SPEC-0053 collapses WORKFLOW to a narrow navigation rail with complete stage
+      tooltips, unchanged availability and selection, and an always-visible expand
+      control. Expanded view restores stage names and session details.
+    - SPEC-0050 presents the read-only Normal Robot Motion lane as training activity coverage including Pick and Put, while retaining the separate editable Pick/Put lanes.
     - Qt framework types never enter L1 public contracts.
     - Long analysis never runs on the UI thread.
     - Waveform scene-graph textures are invalidated when channel data, the shared
@@ -100,6 +115,11 @@ manifest_record:
     - Sensor mapping has independent per-IMU mutually exclusive existing-filtered/software-filtering
       options with raw bypass. Training names the three methods formally and keeps
       hover explanations available even when an algorithm is unavailable.
+    - SPEC-0048 writes one complete self-contained JSONL per confirmed recording under
+      a job-owned staging directory, then publishes the whole new batch without replacing
+      existing exports. Each file contains header, annotations, full sample blocks
+      and end/count/SHA-256; cancellation before publication leaves no successful
+      partial batch.
   entrypoints:
   - path: src/dual_imu_collision_studio/adapters/desktop/waveform_item.py
     symbol: WaveformItem
@@ -122,5 +142,8 @@ manifest_record:
     kind: class
   - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
     symbol: AtomicModelTextWriter
+    kind: class
+  - path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicAnnotatedDataWriter
     kind: class
 ```

@@ -28,9 +28,11 @@ manifest_record:
       and derived Normal regions.
     input_ports:
     - workspace.command
+    - workspace.annotated-export
     output_ports:
     - workspace.tabular-input
     - workspace.events
+    - workspace.annotated-file-output
     emitted_events:
     - workspace.changed
     owned_state: []
@@ -76,6 +78,10 @@ manifest_record:
       uses shared contiguous half-open buckets for Internal and External IMUs, and
       emits a pixel-bounded immutable raw or Min/Max plus arithmetic-mean representation
       without changing annotation indexes.
+    - SPEC-0048 prepares only a complete still-confirmed dataset; derives existing
+      Normal regions, preserves mapped sample values and provenance, never imports
+      Qt or JSON representations, and never confirms provisional annotations as a
+      side effect.
   entrypoints:
   - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
     symbol: WorkspaceService
@@ -93,4 +99,19 @@ manifest_record:
   - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
     symbol: WaveformViewportProjection
     kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ExportChannel
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedRecordingSnapshot
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedDatasetSnapshot
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: AnnotatedDataOutputPort
+    kind: class
+  - path: src/dual_imu_collision_studio/domain/data_workspace/service.py
+    symbol: prepare_annotated_export
+    kind: function
 ```

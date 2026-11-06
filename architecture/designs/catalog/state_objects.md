@@ -15,6 +15,36 @@
 ```yaml
 manifest_field: state_objects
 value:
+- id: workflow-collapsed
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: workflowCollapsed
+    storage: file-static
+  type: bool
+  visibility: private
+  lifetime: One main window; initially expanded and not persisted.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
+- id: pending-ignore-relabel
+  owner: desktop_adapter
+  language: qml
+  declaration:
+    path: src/dual_imu_collision_studio/qml/Main.qml
+    symbol: pendingIgnoreRelabel
+    storage: file-static
+  type: var
+  visibility: private
+  lifetime: One cross-lane Ignore confirmation dialog. Cleared when the dialog closes.
+  mutability: owner-mutable
+  read_authority:
+  - desktop_adapter
+  write_authority:
+  - desktop_adapter
 - id: json-export-queue
   owner: desktop_adapter
   language: qml

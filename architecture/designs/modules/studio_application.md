@@ -46,6 +46,9 @@ manifest_record:
     - replay.export-failed
     - model.exported
     - model.export-failed
+    - annotations.exported
+    - annotations.export-failed
+    - annotations.export-cancelled
     owned_state: []
     side_effects:
     - description: Start the Qt application and coordinate bounded background work.
@@ -53,8 +56,12 @@ manifest_record:
         the application-owned diagnostics port.
     errors: []
     invariants:
+    - SPEC-0050 maps confirmed workspace intervals into Learning-owned values once for both fitting input and the read-only Normal training track; the track includes Pick/Put and retains Cycle boundaries without altering exclusive Normal truth or running a model.
     - Sibling domains communicate only through application-owned mappings.
     - Exactly one release composition root exists.
+    - A cross-lane release maps to one StudioController edit by recording and interval
+      identity. The controller preserves sample geometry, checks the target label
+      and reason, and updates the existing undo history and confirmation state.
     - The QML engine retains the StudioController for the complete main-window lifetime.
     - QML coordinates are converted to sample indexes before domain validation.
     - Provisional annotation edits never enter Learning until the complete set is
@@ -116,12 +123,17 @@ manifest_record:
     - SPEC-0046 worker count is explicit one through eight, default one, application
       session state only and excluded from project/model persistence. Training locks
       this count. Auto, memory-preview worker/state and estimate busy dependencies
-      are removed. Failure summaries retain bounded expandable/copyable details.
-      See architecture/designs/SPEC-0046-pre-code-notes.md for ownership and flow.
+      are removed. Failure summaries retain bounded expandable/copyable details. See
+      architecture/designs/SPEC-0046-pre-code-notes.md for ownership and flow.
     - Application-owned mapping serializes optional qualification_results from Learning
       values and reconstructs immutable Learning values only after ProjectSessionService
       validates structure. Existing qualification_evidence remains the sole current
       export admission proof, with its original policy and frozen-input checks.
+    - SPEC-0048 exposes Export Annotated Data only after valid Confirm All; one borrowed
+      immutable all-recording snapshot runs in the background. All input mutation,
+      replacement, Training/Qualification and artifact output are rejected during
+      the job; selection/zoom remain available. Terminal UI callbacks release the
+      worker before publishing once; close requests cancel then defer window close.
   entrypoints:
   - path: src/dual_imu_collision_studio/app.py
     symbol: main

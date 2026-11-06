@@ -37,6 +37,7 @@ from dual_imu_collision_studio.domain.learning.model import (
     InsufficientTrainingEvidence,
     FitEvidence,
     LearningDataset,
+    LearningInterval,
     LearningProgress,
     OffsetQualification,
     QualificationResult,
@@ -1069,6 +1070,27 @@ class LearningService:
         )
 
     @staticmethod
+    def training_activity_mask(
+        sample_count: int,
+        intervals: tuple[LearningInterval, ...],
+        *,
+        cycle_indexes: set[int] | None = None,
+    ) -> np.ndarray:
+        """Select activity source rows before model-specific history and warmup rules."""
+        eligible = np.zeros(sample_count, dtype=np.bool_)
+        for interval in intervals:
+            if (
+                interval.cycle_index >= 0
+                and (cycle_indexes is None or interval.cycle_index in cycle_indexes)
+                and interval.kind in {"Normal Robot Motion", "Robot Pick", "Robot Put"}
+            ):
+                eligible[interval.start_index : interval.end_index] = True
+        for interval in intervals:
+            if interval.kind in {"Ignore", "Robot Fork Collision"}:
+                eligible[interval.start_index : interval.end_index] = False
+        return eligible
+
+    @staticmethod
     def _build_group_evidence(
         dataset: LearningDataset,
         groups: tuple[CycleFoldGroup, ...],
@@ -1084,7 +1106,15 @@ class LearningService:
             internal = np.asarray(recording.internal_imu)
             external = np.asarray(recording.external_imu)
             discontinuities = np.asarray(recording.discontinuity_before, dtype=np.bool_)
-            eligible = np.zeros(len(internal), dtype=np.bool_)
+            eligible = LearningService.training_activity_mask(
+                len(internal),
+                recording.intervals,
+                cycle_indexes={
+                    cycle
+                    for recording_id, cycle in selected
+                    if recording_id == recording.recording_id
+                },
+            )
             eligible_cycle = np.full(len(internal), -1, dtype=np.int64)
             for interval in recording.intervals:
                 if (
@@ -1093,14 +1123,10 @@ class LearningService:
                     or (recording.recording_id, interval.cycle_index) not in selected
                 ):
                     continue
-                eligible[interval.start_index : interval.end_index] = True
                 eligible_cycle[interval.start_index : interval.end_index] = (
                     interval.cycle_index
                 )
                 interval_count += 1
-            for excluded in recording.intervals:
-                if excluded.kind in {"Ignore", "Robot Fork Collision"}:
-                    eligible[excluded.start_index : excluded.end_index] = False
             if recording.prepared_self:
                 raw_eligible = eligible.copy()
                 eligible[0] = False

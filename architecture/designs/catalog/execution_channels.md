@@ -65,4 +65,17 @@ value:
     only bounded line text is copied to file buffers.
   timeout_ms: 0
   overload: reject
+- id: annotated-data-command
+  profile: windows-desktop
+  from_unit: qt-ui-thread
+  to_unit: replay-export-worker
+  contract_refs:
+  - workspace.annotated-export
+  - workspace.annotated-file-output
+  capacity: 1
+  ordering: One accepted immutable all-recording snapshot per job.
+  copy_policy: Arrays borrowed read-only; metadata and annotation tuples copied; bounded
+    row buffers only.
+  timeout_ms: 0
+  overload: reject
 ```

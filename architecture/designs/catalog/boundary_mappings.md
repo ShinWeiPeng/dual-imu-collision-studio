@@ -115,6 +115,21 @@ value:
   forbidden_edges:
   - data_workspace->learning_qualification
   - learning_qualification->data_workspace
+- id: training-activity-to-desktop
+  interaction: Parent maps the Learning-owned pure training activity mask into read-only
+    Normal Robot Motion start/end fractions, including Pick and Put while preserving
+    exclusive activity truth, selected-recording scope and individual Cycle boundaries.
+  producer: learning_qualification
+  consumer: studio_application
+  parent: studio_application
+  producer_contract: learning-service
+  consumer_contract: studio-controller
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->learning_qualification
+  forbidden_edges:
+  - learning_qualification->studio_application
 - id: learning-settings-to-project
   interaction: Map editable next-run Learning settings and immutable captured run
     provenance to or from project-owned semantic values, applying explicit fixed-grid
@@ -148,4 +163,19 @@ value:
   forbidden_edges:
   - learning_qualification->profile_export
   - profile_export->learning_qualification
+- id: session-to-annotated-snapshot
+  interaction: Parent-private session rows are copied into workspace-owned immutable
+    export metadata; downstream adapter legally consumes that same workspace contract
+    through its demand-owned output Port without a second DTO.
+  producer: studio_application
+  consumer: data_workspace
+  parent: studio_application
+  producer_contract: studio-controller
+  consumer_contract: annotated-dataset-snapshot
+  mapping_owner: studio_application
+  state_objects: []
+  allowed_edges:
+  - studio_application->data_workspace
+  forbidden_edges:
+  - data_workspace->studio_application
 ```

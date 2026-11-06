@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -279,3 +280,42 @@ class WaveformViewportProjection:
             raise ValueError("waveform projection channels must match its positions")
         if self.sample_start < 0 or self.sample_end < self.sample_start:
             raise ValueError("waveform projection sample range must be ordered")
+
+
+@dataclass(frozen=True, slots=True)
+class ExportChannel:
+    column_id: str
+    sensor: str
+    signal_kind: str
+    axis: str
+    array_column: int
+    source_column: str
+    source_mapping_role: str
+    configured_mode: str
+    unit: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotatedRecordingSnapshot:
+    recording: Recording
+    name: str
+    worksheet: str
+    mapping: Mapping[str, object]
+    channels: tuple[ExportChannel, ...]
+    interpolated_indices: tuple[int, ...] = ()
+    import_warnings: tuple[str, ...] = ()
+    normal_intervals: tuple[AnnotationInterval, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class AnnotatedDatasetSnapshot:
+    recordings: tuple[AnnotatedRecordingSnapshot, ...]
+    export_id: str
+    created_at: str
+    studio_version: str
+    project_name: str
+    annotations_ready: bool
+
+
+class AnnotatedExportCancelled(RuntimeError):
+    """An accepted export was cancelled before its batch was published."""

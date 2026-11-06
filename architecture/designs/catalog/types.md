@@ -2333,7 +2333,9 @@ value:
   - filter-design
   - frozen-self-imu-model
   - deployment-qualification
-  fields: *id017
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  fields: []
 - id: learning-worker-signals
   owner: studio_application
   language: python
@@ -2787,8 +2789,10 @@ value:
     kind: class
   visibility: private
   semantic_kind: private-helper
-  description: Owner-private borrowed immutable FIR samples with valid source row indexes; materializes requested blocks only.
-  lifetime: One Learning fitting or prediction matrix; never retained in a frozen model.
+  description: Owner-private borrowed immutable FIR samples with valid source row
+    indexes; materializes requested blocks only.
+  lifetime: One Learning fitting or prediction matrix; never retained in a frozen
+    model.
   mutability: immutable
   mutation_authority: []
   consumers:
@@ -2811,4 +2815,293 @@ value:
     type: tuple
     role: metadata
     meaning: Logical row count and channel-major lag width; not a dense allocation.
+- id: annotated-export-channel
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: ExportChannel
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 ExportChannel: confirmed-only self-contained recording export
+    contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields:
+  - name: column_id
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: sensor
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: signal_kind
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: axis
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: array_column
+    type: int
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: source_column
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: source_mapping_role
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: configured_mode
+    type: str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+  - name: unit
+    type: optional str
+    role: configuration
+    meaning: One mapped primary channel descriptor; unknown units remain explicit.
+- id: annotated-recording-snapshot
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedRecordingSnapshot
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedRecordingSnapshot: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - recording
+  - annotation-interval
+  - annotated-export-channel
+  fields:
+  - name: recording
+    type: Recording
+    role: domain-value
+    meaning: Confirmed borrowed recording; arrays are read-only for job lifetime.
+  - name: name
+    type: str
+    role: metadata
+    meaning: Display source name.
+  - name: worksheet
+    type: str
+    role: metadata
+    meaning: Source worksheet identity.
+  - name: mapping
+    type: Mapping
+    role: configuration
+    meaning: Frozen semantic source mapping and preprocessing settings.
+  - name: channels
+    type: tuple ExportChannel
+    role: configuration
+    meaning: Ordered actual sensor/signal descriptors.
+  - name: interpolated_indices
+    type: tuple int
+    role: metadata
+    meaning: Inserted indexes on aligned timeline.
+  - name: import_warnings
+    type: tuple str
+    role: metadata
+    meaning: Original import warnings.
+  - name: normal_intervals
+    type: tuple AnnotationInterval
+    role: domain-value
+    meaning: Derived existing-policy Normal evidence.
+- id: annotated-dataset-snapshot
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedDatasetSnapshot
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedDatasetSnapshot: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - annotated-recording-snapshot
+  fields:
+  - name: recordings
+    type: tuple AnnotatedRecordingSnapshot
+    role: domain-value
+    meaning: All confirmed recordings of one consistent session.
+  - name: export_id
+    type: str
+    role: domain-identity
+    meaning: One in-process correlation identity.
+  - name: created_at
+    type: str
+    role: metadata
+    meaning: UTC capture timestamp.
+  - name: studio_version
+    type: str
+    role: metadata
+    meaning: Application release version.
+  - name: project_name
+    type: str
+    role: metadata
+    meaning: Session display name.
+  - name: annotations_ready
+    type: bool
+    role: contract-control
+    meaning: True only after successful still-valid confirmation.
+- id: annotated-data-output-port
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+    symbol: AnnotatedDataOutputPort
+    kind: class
+  visibility: cross-module
+  semantic_kind: port
+  description: 'SPEC-0048 AnnotatedDataOutputPort: confirmed-only self-contained recording
+    export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references:
+  - annotated-dataset-snapshot
+  fields: []
+- id: annotated-export-cancelled
+  owner: data_workspace
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/domain/data_workspace/model.py
+    symbol: AnnotatedExportCancelled
+    kind: class
+  visibility: cross-module
+  semantic_kind: domain-value
+  description: 'SPEC-0048 AnnotatedExportCancelled: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: immutable
+  mutation_authority: []
+  consumers:
+  - data_workspace
+  - studio_application
+  - desktop_adapter
+  references: []
+  fields: []
+- id: atomic-annotated-data-writer
+  owner: desktop_adapter
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/replay_writer.py
+    symbol: AtomicAnnotatedDataWriter
+    kind: class
+  visibility: module-public
+  semantic_kind: adapter-binding
+  description: 'SPEC-0048 AtomicAnnotatedDataWriter: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - desktop_adapter
+  consumers:
+  - desktop_adapter
+  - studio_application
+  references:
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  - annotated-export-cancelled
+  fields: []
+- id: annotated-data-export-signals
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _AnnotatedDataExportSignals
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: 'SPEC-0048 _AnnotatedDataExportSignals: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references: []
+  fields: []
+- id: annotated-data-export-worker
+  owner: studio_application
+  language: python
+  declaration:
+    path: src/dual_imu_collision_studio/adapters/desktop/controller.py
+    symbol: _AnnotatedDataExportWorker
+    kind: class
+  visibility: private
+  semantic_kind: composition-mapping
+  description: 'SPEC-0048 _AnnotatedDataExportWorker: confirmed-only self-contained
+    recording export contract.'
+  lifetime: One accepted annotated dataset export; no project persistence.
+  mutability: owner-mutable
+  mutation_authority:
+  - studio_application
+  consumers:
+  - studio_application
+  references:
+  - annotated-dataset-snapshot
+  - annotated-data-output-port
+  - annotated-data-export-signals
+  fields:
+  - name: _progress_counts
+    type: tuple[int, int]
+    role: runtime-state
+    meaning: Worker is the only writer; UI reads one replaced immutable pair without queued per-chunk events.
+  - name: export_id
+    type: str
+    role: metadata
+    meaning: Immutable accepted-job identity checked by the UI terminal receiver.
+  - name: _cancel
+    type: threading.Event
+    role: runtime-state
+    meaning: UI may request cancellation; worker observes between bounded blocks.
+  - name: _dataset
+    type: AnnotatedDatasetSnapshot
+    role: domain-value
+    meaning: Private immutable snapshot binding.
+  - name: _writer
+    type: AnnotatedDataOutputPort
+    role: adapter-binding
+    meaning: Concrete technology bound only by L0.
+  - name: signals
+    type: Qt signals
+    role: framework-handle
+    meaning: Private queued bridge; worker never updates controller runtime.
+  - name: _destination
+    type: str
+    role: metadata
+    meaning: User-selected existing parent folder.
 ```

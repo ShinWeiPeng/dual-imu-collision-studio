@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
+from types import MappingProxyType
 from dataclasses import replace
 import math
 
 import numpy as np
 
 from dual_imu_collision_studio.domain.data_workspace.model import (
+    AnnotatedDatasetSnapshot,
+    AnnotatedExportCancelled,
     ActivityKind,
     AnnotationInterval,
     AnnotationTemplate,
@@ -20,7 +23,12 @@ class WorkspaceService:
     """Validates explicit interval truth and derives Normal Robot Motion."""
 
     _EVENT_KINDS = frozenset(
-        {ActivityKind.PICK, ActivityKind.PUT, ActivityKind.FORK_COLLISION, ActivityKind.IGNORE}
+        {
+            ActivityKind.PICK,
+            ActivityKind.PUT,
+            ActivityKind.FORK_COLLISION,
+            ActivityKind.IGNORE,
+        }
     )
     _POSITIVE_EVENT_KINDS = frozenset(
         {ActivityKind.PICK, ActivityKind.PUT, ActivityKind.FORK_COLLISION}
@@ -54,7 +62,9 @@ class WorkspaceService:
             empty = ((), (), ())
             return WaveformViewportProjection("raw", (), empty, empty, empty, 0, 0)
 
-        sample_start = min(sample_count - 1, int(math.floor(start_fraction * sample_count)))
+        sample_start = min(
+            sample_count - 1, int(math.floor(start_fraction * sample_count))
+        )
         sample_end = min(
             sample_count,
             max(sample_start + 1, int(math.ceil(end_fraction * sample_count))),
@@ -66,7 +76,9 @@ class WorkspaceService:
         span = end_fraction - start_fraction
 
         if visible_count <= width:
-            centers = (np.arange(sample_start, sample_end, dtype=np.float64) + 0.5) / sample_count
+            centers = (
+                np.arange(sample_start, sample_end, dtype=np.float64) + 0.5
+            ) / sample_count
             positions = tuple(
                 round(float(max(0.0, min(1.0, (center - start_fraction) / span))), 15)
                 for center in centers
@@ -82,7 +94,9 @@ class WorkspaceService:
         bucket_starts = offsets[:-1]
         minimum_rows = np.minimum.reduceat(visible, bucket_starts, axis=0)
         maximum_rows = np.maximum.reduceat(visible, bucket_starts, axis=0)
-        mean_rows = np.add.reduceat(visible, bucket_starts, axis=0) / np.diff(offsets)[:, None]
+        mean_rows = (
+            np.add.reduceat(visible, bucket_starts, axis=0) / np.diff(offsets)[:, None]
+        )
         edges = sample_start + offsets
         centers = ((edges[:-1] + edges[1:]) * 0.5) / sample_count
         positions = tuple(
@@ -118,7 +132,8 @@ class WorkspaceService:
             and selected.start_index < item.end_index
         )
         if any(
-            item.start_index < selected.start_index or selected.end_index < item.end_index
+            item.start_index < selected.start_index
+            or selected.end_index < item.end_index
             for item in touching_events
         ):
             raise ValueError("an event crosses the selected reference Cycle boundary")
@@ -143,10 +158,14 @@ class WorkspaceService:
             item for item in self._cycles(confirmed) if not item.provisional
         )
         if len(confirmed_cycles) < 2:
-            raise ValueError("Use as Reference requires at least two confirmed Cycle intervals for cadence")
+            raise ValueError(
+                "Use as Reference requires at least two confirmed Cycle intervals for cadence"
+            )
         if any(item.end_index > len(recording.time_s) for item in confirmed_cycles):
             raise ValueError("a confirmed source Cycle exceeds the recording")
-        self._reject_overlap(confirmed_cycles, "confirmed source Cycle intervals overlap")
+        self._reject_overlap(
+            confirmed_cycles, "confirmed source Cycle intervals overlap"
+        )
         if recording.discontinuity_before is not None:
             discontinuities = np.asarray(recording.discontinuity_before, dtype=np.bool_)
             for item in (selected,) + touching_events:
@@ -154,7 +173,9 @@ class WorkspaceService:
                     raise ValueError(f"{item.kind.value} crosses a Time Discontinuity")
         return activated, self.build_annotation_template(activated, cycle_index)
 
-    def build_annotation_template(self, recording: Recording, cycle_index: int) -> AnnotationTemplate:
+    def build_annotation_template(
+        self, recording: Recording, cycle_index: int
+    ) -> AnnotationTemplate:
         self._reject_ignore_collision_overlap(recording.annotations)
         cycles = self._cycles(recording.annotations)
         if not 0 <= cycle_index < len(cycles):
@@ -173,14 +194,18 @@ class WorkspaceService:
             )
         )
         if not events:
-            raise ValueError("Reference Cycle requires at least one Pick, Put, or Fork Collision event")
+            raise ValueError(
+                "Reference Cycle requires at least one Pick, Put, or Fork Collision event"
+            )
         self._reject_overlap(
             tuple(item for item in events if item.kind in self._POSITIVE_EVENT_KINDS),
             "Reference Cycle event intervals overlap",
         )
         duration = cycle.end_index - cycle.start_index
         starts = [item.start_index for item in cycles if not item.provisional]
-        period = float(np.median(np.diff(starts))) if len(starts) >= 2 else float(duration)
+        period = (
+            float(np.median(np.diff(starts))) if len(starts) >= 2 else float(duration)
+        )
         return AnnotationTemplate(
             recording.condition.robot_speed_mm_s,
             recording.recording_id,
@@ -202,7 +227,9 @@ class WorkspaceService:
         self, recording: Recording, template: AnnotationTemplate
     ) -> Recording:
         if recording.condition.robot_speed_mm_s != template.robot_speed_mm_s:
-            raise ValueError("annotation template Robot Speed does not match destination recording")
+            raise ValueError(
+                "annotation template Robot Speed does not match destination recording"
+            )
         retained = [item for item in recording.annotations if not item.provisional]
         cycles = self._cycles(retained)
         if len(cycles) == 1:
@@ -243,8 +270,12 @@ class WorkspaceService:
                 ordinals[event.kind] += 1
                 if ordinal < len(existing_by_kind[event.kind]):
                     continue
-                start = cycle.start_index + self._nearest_sample(event.start_phase * duration)
-                end = cycle.start_index + self._nearest_sample(event.end_phase * duration)
+                start = cycle.start_index + self._nearest_sample(
+                    event.start_phase * duration
+                )
+                end = cycle.start_index + self._nearest_sample(
+                    event.end_phase * duration
+                )
                 start = max(cycle.start_index, min(cycle.end_index - 1, start))
                 end = max(start + 1, min(cycle.end_index, end))
                 if event.kind in self._POSITIVE_EVENT_KINDS and any(
@@ -286,7 +317,12 @@ class WorkspaceService:
         annotations: Iterable[AnnotationInterval],
         discontinuity_before: object | None = None,
     ) -> tuple[AnnotationInterval, ...]:
-        items = tuple(sorted(annotations, key=lambda item: (item.start_index, item.end_index, item.kind.value)))
+        items = tuple(
+            sorted(
+                annotations,
+                key=lambda item: (item.start_index, item.end_index, item.kind.value),
+            )
+        )
         self._reject_duplicate_identity(items)
         self._reject_ignore_collision_overlap(items)
         cycles = tuple(item for item in items if item.kind is ActivityKind.CYCLE)
@@ -299,10 +335,14 @@ class WorkspaceService:
         if discontinuity_before is not None:
             discontinuities = np.asarray(discontinuity_before, dtype=np.bool_)
             if discontinuities.shape != (sample_count,):
-                raise ValueError("discontinuity markers must match the recording row count")
+                raise ValueError(
+                    "discontinuity markers must match the recording row count"
+                )
             for item in items:
                 if discontinuities[item.start_index + 1 : item.end_index].any():
-                    raise ValueError(f"{item.kind.value} interval crosses a Time Discontinuity")
+                    raise ValueError(
+                        f"{item.kind.value} interval crosses a Time Discontinuity"
+                    )
         self._reject_overlap(cycles, "Cycle intervals overlap")
         self._reject_overlap(
             tuple(item for item in events if item.kind in self._POSITIVE_EVENT_KINDS),
@@ -311,25 +351,49 @@ class WorkspaceService:
         if len(cycles) < 2:
             raise ValueError("every recording requires at least two Cycle intervals")
         for event in events:
-            containing = [cycle for cycle in cycles if cycle.start_index <= event.start_index and event.end_index <= cycle.end_index]
+            containing = [
+                cycle
+                for cycle in cycles
+                if cycle.start_index <= event.start_index
+                and event.end_index <= cycle.end_index
+            ]
             if len(containing) != 1:
-                raise ValueError(f"{event.kind.value} must be contained by exactly one Cycle")
+                raise ValueError(
+                    f"{event.kind.value} must be contained by exactly one Cycle"
+                )
         expected_counts: tuple[int, int, int] | None = None
         for cycle in cycles:
             counts = {
                 kind: sum(
-                    cycle.start_index <= event.start_index and event.end_index <= cycle.end_index and event.kind is kind
+                    cycle.start_index <= event.start_index
+                    and event.end_index <= cycle.end_index
+                    and event.kind is kind
                     for event in events
                 )
-                for kind in (ActivityKind.PICK, ActivityKind.PUT, ActivityKind.FORK_COLLISION)
+                for kind in (
+                    ActivityKind.PICK,
+                    ActivityKind.PUT,
+                    ActivityKind.FORK_COLLISION,
+                )
             }
-            count_tuple = tuple(counts[kind] for kind in (ActivityKind.PICK, ActivityKind.PUT, ActivityKind.FORK_COLLISION))
+            count_tuple = tuple(
+                counts[kind]
+                for kind in (
+                    ActivityKind.PICK,
+                    ActivityKind.PUT,
+                    ActivityKind.FORK_COLLISION,
+                )
+            )
             if sum(count_tuple) == 0:
-                raise ValueError("every valid Cycle requires at least one Pick, Put, or Fork Collision event")
+                raise ValueError(
+                    "every valid Cycle requires at least one Pick, Put, or Fork Collision event"
+                )
             if expected_counts is None:
                 expected_counts = count_tuple
             elif count_tuple != expected_counts:
-                raise ValueError("every valid Cycle must use the same Pick, Put, and Fork Collision counts")
+                raise ValueError(
+                    "every valid Cycle must use the same Pick, Put, and Fork Collision counts"
+                )
         return items
 
     def derive_normal_intervals(
@@ -338,8 +402,13 @@ class WorkspaceService:
         *,
         collision_response_window_s: float,
     ) -> tuple[AnnotationInterval, ...]:
-        if not math.isfinite(collision_response_window_s) or collision_response_window_s <= 0:
-            raise ValueError("Collision response window must be finite and greater than zero")
+        if (
+            not math.isfinite(collision_response_window_s)
+            or collision_response_window_s <= 0
+        ):
+            raise ValueError(
+                "Collision response window must be finite and greater than zero"
+            )
         items = self.validate_annotations(
             len(recording.time_s), recording.annotations, recording.discontinuity_before
         )
@@ -355,11 +424,16 @@ class WorkspaceService:
         for cycle in cycles:
             excluded_ranges: list[tuple[int, int]] = []
             for event in excluded:
-                if event.start_index < cycle.start_index or event.end_index > cycle.end_index:
+                if (
+                    event.start_index < cycle.start_index
+                    or event.end_index > cycle.end_index
+                ):
                     continue
                 end = event.end_index
                 if event.kind is ActivityKind.FORK_COLLISION:
-                    deadline = float(times[event.start_index]) + collision_response_window_s
+                    deadline = (
+                        float(times[event.start_index]) + collision_response_window_s
+                    )
                     response_end = min(
                         cycle.end_index,
                         int(np.searchsorted(times, deadline + 1e-12, side="right")),
@@ -383,12 +457,17 @@ class WorkspaceService:
 
     @staticmethod
     def _reject_ignore_collision_overlap(items: tuple[AnnotationInterval, ...]) -> None:
-        collisions = tuple(item for item in items if item.kind is ActivityKind.FORK_COLLISION)
+        collisions = tuple(
+            item for item in items if item.kind is ActivityKind.FORK_COLLISION
+        )
         for ignored in items:
             if ignored.kind is not ActivityKind.IGNORE:
                 continue
             for collision in collisions:
-                if ignored.start_index < collision.end_index and collision.start_index < ignored.end_index:
+                if (
+                    ignored.start_index < collision.end_index
+                    and collision.start_index < ignored.end_index
+                ):
                     raise ValueError(
                         f"Ignore {ignored.interval_id} and Collision {collision.interval_id} overlap"
                     )
@@ -403,7 +482,9 @@ class WorkspaceService:
     def _reject_duplicate_identity(items: Iterable[AnnotationInterval]) -> None:
         identities = [item.interval_id for item in items]
         if len(identities) != len(set(identities)):
-            raise ValueError("annotation interval identity must be unique within a recording")
+            raise ValueError(
+                "annotation interval identity must be unique within a recording"
+            )
 
     @staticmethod
     def _derived_normal(start_index: int, end_index: int) -> AnnotationInterval:
@@ -415,7 +496,9 @@ class WorkspaceService:
         object.__setattr__(interval, "provisional", False)
         object.__setattr__(interval, "source_recording_id", None)
         object.__setattr__(interval, "source_cycle_index", None)
-        object.__setattr__(interval, "interval_id", f"derived-normal:{start_index}:{end_index}")
+        object.__setattr__(
+            interval, "interval_id", f"derived-normal:{start_index}:{end_index}"
+        )
         return interval
 
     @staticmethod
@@ -423,7 +506,9 @@ class WorkspaceService:
         return int(math.floor(value + 0.5 - 1e-12))
 
     @staticmethod
-    def _cycles(annotations: Iterable[AnnotationInterval]) -> tuple[AnnotationInterval, ...]:
+    def _cycles(
+        annotations: Iterable[AnnotationInterval],
+    ) -> tuple[AnnotationInterval, ...]:
         return tuple(
             sorted(
                 (item for item in annotations if item.kind is ActivityKind.CYCLE),
@@ -446,11 +531,15 @@ class WorkspaceService:
         }
         step = 1
         while True:
-            start = anchor.start_index - self._nearest_sample(step * template.cycle_period_samples)
+            start = anchor.start_index - self._nearest_sample(
+                step * template.cycle_period_samples
+            )
             if start < 0:
                 break
             end = start + template.reference_cycle_length_samples
-            if end <= anchor.start_index and not self._overlaps_any_cycle(start, end, generated):
+            if end <= anchor.start_index and not self._overlaps_any_cycle(
+                start, end, generated
+            ):
                 generated.append(
                     AnnotationInterval(
                         ActivityKind.CYCLE,
@@ -469,11 +558,15 @@ class WorkspaceService:
             step += 1
         step = 1
         while True:
-            start = anchor.start_index + self._nearest_sample(step * template.cycle_period_samples)
+            start = anchor.start_index + self._nearest_sample(
+                step * template.cycle_period_samples
+            )
             end = start + template.reference_cycle_length_samples
             if end > sample_count:
                 break
-            if anchor.end_index <= start and not self._overlaps_any_cycle(start, end, generated):
+            if anchor.end_index <= start and not self._overlaps_any_cycle(
+                start, end, generated
+            ):
                 generated.append(
                     AnnotationInterval(
                         ActivityKind.CYCLE,
@@ -515,3 +608,209 @@ class WorkspaceService:
             f"proposal:{destination_recording_id}:{template.source_recording_id}:"
             f"{template.source_cycle_index}:{cycle_start}:{kind.value}:{ordinal}"
         )
+
+
+def _freeze_export_configuration(value):
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {key: _freeze_export_configuration(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_export_configuration(item) for item in value)
+    return value
+
+
+def _export_mapping_channels(mapping, sensor):
+    schema = mapping.get("signal_mapping_schema")
+    if schema is None:
+        settings = mapping.get("preprocessing") or {}
+        mode = (
+            settings.get("source_mode", "raw")
+            if mapping.get("single_sensor") == sensor
+            else "raw"
+        )
+        return [
+            (
+                i,
+                "unknown",
+                "xyz"[i % 3],
+                name,
+                "filtered" if mode == "already_filtered" else "legacy",
+                mode,
+            )
+            for i, name in enumerate(mapping.get(sensor + "_columns", ()))
+        ]
+    if schema not in (1, 2):
+        raise ValueError("Unsupported signal mapping schema")
+    descriptor = mapping.get("signals", {}).get(sensor, {})
+    groups = []
+    if descriptor.get("accelerometer_enabled", True):
+        groups.append(("accelerometer", descriptor))
+    if descriptor.get("gyroscope") is not None:
+        groups.append(("gyroscope", descriptor["gyroscope"]))
+    result = []
+    for kind, group in groups:
+        raw = group.get("raw_columns") or ()
+        sources = raw or group.get("filtered_columns") or ()
+        mode = group.get("mode", "raw")
+        if not sources:
+            continue
+        if len(sources) != 3 or mode not in {
+            "raw",
+            "already_filtered",
+            "application_filtered",
+        }:
+            raise ValueError(
+                "Primary signal mapping must contain three axes and a known source mode"
+            )
+        offset = len(result)
+        result.extend(
+            (offset + i, kind, "xyz"[i], name, "raw" if raw else "filtered", mode)
+            for i, name in enumerate(sources)
+        )
+    return result
+
+
+def prepare_annotated_export(
+    dataset: AnnotatedDatasetSnapshot,
+    *,
+    cancelled: Callable[[], bool] | None = None,
+) -> AnnotatedDatasetSnapshot:
+    """Validate the complete confirmed snapshot without copying waveform arrays."""
+    if not dataset.annotations_ready or not dataset.recordings:
+        raise ValueError("Confirm All Annotation Sets before exporting annotated data")
+    if not dataset.export_id or not dataset.created_at:
+        raise ValueError("Export identity and capture time are required")
+    identities = [item.recording.recording_id for item in dataset.recordings]
+    if len(set(identities)) != len(identities):
+        raise ValueError("Recording identities must be unique within an export")
+    workspace = WorkspaceService()
+    prepared = []
+    for entry in dataset.recordings:
+        recording = entry.recording
+        count = len(recording.time_s)
+        if cancelled and cancelled():
+            raise AnnotatedExportCancelled("Annotated data export cancelled")
+        if any(item.provisional for item in recording.annotations):
+            raise ValueError(
+                f"{entry.name}: provisional annotations cannot be exported"
+            )
+        if not all(
+            math.isfinite(float(value))
+            for value in (
+                recording.sample_rate_hz,
+                recording.condition.robot_speed_mm_s,
+                recording.condition.collision_offset_mm,
+            )
+        ):
+            raise ValueError(f"{entry.name}: recording conditions must be finite")
+        columns = entry.channels
+        if not columns or len({item.column_id for item in columns}) != len(columns):
+            raise ValueError(f"{entry.name}: export channel identities must be unique")
+        for channel in columns:
+            if channel.sensor not in {"internal", "external"} or channel.axis not in {
+                "x",
+                "y",
+                "z",
+            }:
+                raise ValueError(f"{entry.name}: invalid channel sensor or axis")
+            if channel.signal_kind not in {"accelerometer", "gyroscope", "unknown"}:
+                raise ValueError(f"{entry.name}: invalid signal kind")
+            if not channel.column_id or not channel.source_column:
+                raise ValueError(f"{entry.name}: source channel mapping is required")
+        for sensor in ("internal", "external"):
+            values = getattr(recording, sensor + "_imu")
+            mapped = [item for item in columns if item.sensor == sensor]
+            expected = _export_mapping_channels(entry.mapping, sensor)
+            actual = sorted(
+                (
+                    item.array_column,
+                    item.signal_kind,
+                    item.axis,
+                    item.source_column,
+                    item.source_mapping_role,
+                    item.configured_mode,
+                )
+                for item in mapped
+            )
+            if (
+                actual != expected
+                or entry.mapping.get("single_sensor") != recording.single_sensor
+            ):
+                raise ValueError(
+                    f"{entry.name}: primary channels disagree with the confirmed mapping"
+                )
+            if values is None:
+                if mapped:
+                    raise ValueError(f"{entry.name}: absent sensor has mapped channels")
+            elif (
+                len(mapped) != values.shape[1]
+                or sorted(item.array_column for item in mapped)
+                != list(range(values.shape[1]))
+                or len(values) != count
+            ):
+                raise ValueError(
+                    f"{entry.name}: channels do not match the primary arrays"
+                )
+        if (
+            recording.single_sensor is not None
+            and getattr(
+                recording,
+                ("external" if recording.single_sensor == "internal" else "internal")
+                + "_imu",
+            )
+            is not None
+        ):
+            raise ValueError(
+                f"{entry.name}: single-IMU data contains an unexpected sensor"
+            )
+        inserted = entry.interpolated_indices
+        if tuple(sorted(set(inserted))) != inserted or any(
+            type(index) is not int or index <= 0 or index >= count - 1
+            for index in inserted
+        ):
+            raise ValueError(f"{entry.name}: invalid interpolation provenance")
+        if (
+            type(entry.mapping.get("data_start_row")) is not int
+            or entry.mapping["data_start_row"] < 1
+        ):
+            raise ValueError(f"{entry.name}: source data_start_row is required")
+        previous_time = -math.inf
+        for start in range(0, count, 4096):
+            if cancelled and cancelled():
+                raise AnnotatedExportCancelled("Annotated data export cancelled")
+            times = np.asarray(recording.time_s[start : start + 4096])
+            if (
+                not np.isfinite(times).all()
+                or times[0] <= previous_time
+                or np.any(np.diff(times) <= 0)
+            ):
+                raise ValueError(
+                    f"{entry.name}: sample times must be finite and strictly increasing"
+                )
+            previous_time = float(times[-1])
+            for sensor in (recording.internal_imu, recording.external_imu):
+                if (
+                    sensor is not None
+                    and not np.isfinite(sensor[start : start + 4096]).all()
+                ):
+                    raise ValueError(f"{entry.name}: primary samples must be finite")
+        workspace.validate_annotations(
+            count, recording.annotations, recording.discontinuity_before
+        )
+        normal = workspace.derive_normal_intervals(
+            recording, collision_response_window_s=0.150
+        )
+        output_ids = [item.interval_id for item in (*recording.annotations, *normal)]
+        if len(set(output_ids)) != len(output_ids):
+            raise ValueError(
+                f"{entry.name}: explicit and derived annotation identities must be unique"
+            )
+        prepared.append(
+            replace(
+                entry,
+                mapping=_freeze_export_configuration(entry.mapping),
+                normal_intervals=normal,
+            )
+        )
+    return replace(dataset, recordings=tuple(prepared))

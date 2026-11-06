@@ -298,8 +298,8 @@ value:
   contract: src/dual_imu_collision_studio/adapters/desktop/controller.py
   implemented_by: []
   description:
-    purpose: Publish the terminal outcome of one accepted background Replay CSV or
-      Model TXT export.
+    purpose: Publish terminal outcomes for accepted Replay CSV, Model TXT and annotated
+      dataset exports through one application output sink.
     data: Artifact kind plus saved destination path on success or a bounded failure
       message on failure.
     timing: async
@@ -324,4 +324,41 @@ value:
       condition: Duplicate job identities or unsupported worker capacity.
   symbols:
   - LearningExecutionPort
+- id: workspace.annotated-export
+  owner: data_workspace
+  direction: input
+  kind: query
+  contract: src/dual_imu_collision_studio/domain/data_workspace/service.py
+  implemented_by: []
+  description:
+    purpose: Validate an immutable confirmed dataset and derive current-policy Normal
+      evidence.
+    data: Borrowed immutable dataset, typed channel/annotation/provenance values;
+      no Qt or JSON wire values.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-annotated-dataset
+      condition: Confirmation is stale, provisional or input shapes/provenance are
+        inconsistent.
+  symbols:
+  - prepare_annotated_export
+- id: workspace.annotated-file-output
+  owner: data_workspace
+  direction: output
+  kind: dependency
+  contract: src/dual_imu_collision_studio/domain/data_workspace/contracts.py
+  implemented_by:
+  - desktop_adapter
+  description:
+    purpose: Write a complete batch of independent self-contained recording files
+      with cooperative cancellation and final publication.
+    data: Borrowed immutable dataset, typed channel/annotation/provenance values;
+      no Qt or JSON wire values.
+    timing: sync
+    immediate_rejections:
+    - code: invalid-annotated-dataset
+      condition: Confirmation is stale, provisional or input shapes/provenance are
+        inconsistent.
+  symbols:
+  - AnnotatedDataOutputPort
 ```

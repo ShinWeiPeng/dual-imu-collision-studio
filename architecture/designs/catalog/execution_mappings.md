@@ -112,4 +112,21 @@ value:
   reentrant: false
   activation: Model TXT export command
   wcet: Data-dependent and bounded by tap_count and local filesystem behavior.
+- id: annotated-data-map
+  profile: windows-desktop
+  workload: annotated-data-write
+  steps:
+  - export-annotated-data.step-1
+  - export-annotated-data.step-2
+  - export-annotated-data.step-3
+  - export-annotated-data.step-4
+  units:
+  - qt-ui-thread
+  - replay-export-worker
+  serialization: One active mutually exclusive snapshot; queued progress is coalesced
+    on the UI thread and terminal delivery is at-most-once.
+  reentrant: false
+  activation: Confirmed annotated-data export command
+  wcet: Not established; best-effort local sequential formatting and filesystem I/O,
+    no real-time deadline claim.
 ```

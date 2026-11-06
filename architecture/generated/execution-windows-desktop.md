@@ -30,6 +30,7 @@
 | `profile-ui-map` | `profile-write` | `export-profile.step-1` | `qt-ui-thread` | One user-approved save operation. | False | Not established for local filesystem output. |
 | `replay-csv-map` | `replay-csv-write` | `export-replay-csv.step-1`, `export-replay-csv.step-2`, `export-replay-csv.step-3` | `qt-ui-thread`, `replay-export-worker` | The UI snapshots one selected complete recording, candidate, and destination, permits one active artifact export, and receives one queued terminal completion or failure signal. | False | Data-dependent and bounded by the selected recording row count and local filesystem behavior. |
 | `model-txt-map` | `model-txt-write` | `export-model-txt.step-1`, `export-model-txt.step-2`, `export-model-txt.step-3` | `qt-ui-thread`, `replay-export-worker` | The UI snapshots one selected candidate, sample rate, numeric type, and destination, shares the one-active-artifact exclusion with Replay CSV, and receives one queued terminal completion or failure signal. | False | Data-dependent and bounded by tap_count and local filesystem behavior. |
+| `annotated-data-map` | `annotated-data-write` | `export-annotated-data.step-1`, `export-annotated-data.step-2`, `export-annotated-data.step-3`, `export-annotated-data.step-4` | `qt-ui-thread`, `replay-export-worker` | One active mutually exclusive snapshot; queued progress is coalesced on the UI thread and terminal delivery is at-most-once. | False | Not established; best-effort local sequential formatting and filesystem I/O, no real-time deadline claim. |
 
 ## Execution Channels
 
@@ -39,6 +40,7 @@
 | `worker-ui-progress` | `analysis-worker` | `qt-ui-thread` | `learning.progressed`, `learning.completed`, `learning.cancelled` | 2 | FIFO per event type | immutable snapshot copy | 0 | `coalesce` |
 | `replay-export-command` | `qt-ui-thread` | `replay-export-worker` | `learning.replay-export`, `learning.replay-file-output` | 1 | One selected input snapshot per accepted export command | Immutable selection inputs and NumPy arrays are shared read-only within the process; only bounded row text is copied to file buffers. | 0 | `reject` |
 | `model-export-command` | `qt-ui-thread` | `replay-export-worker` | `learning.model-export`, `learning.model-file-output` | 1 | One selected candidate snapshot per accepted export command | Immutable candidate parameters are shared read-only within the process; only bounded line text is copied to file buffers. | 0 | `reject` |
+| `annotated-data-command` | `qt-ui-thread` | `replay-export-worker` | `workspace.annotated-export`, `workspace.annotated-file-output` | 1 | One accepted immutable all-recording snapshot per job. | Arrays borrowed read-only; metadata and annotation tuples copied; bounded row buffers only. | 0 | `reject` |
 
 ## Data Access Profiles
 
